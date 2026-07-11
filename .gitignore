@@ -377,6 +377,8 @@ x86/
 *.user
 *.userosscache
 *.sln.docstates
+*.sln
+*.exe
 
 # CUDA/compiler junk
 *.exe
