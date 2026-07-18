@@ -1,6 +1,6 @@
 cd "D:\visual_studio\deep_reinforcement_learning"
 
-nvcc -std=c++17 -Xcompiler "/std:c++17 /MD" -o carLearns.exe deep_reinforcement_learning\engine.cpp D:\glad\src\glad.c ^
+nvcc -std=c++17 -Xcompiler "/std:c++17 /MD" -o carLearns.exe deep_reinforcement_learning\engine.cpp deep_reinforcement_learning\draw.cu deep_reinforcement_learning\network.cu D:\glad\src\glad.c ^
   -I"D:\visual_studio\noRender\noRender" ^
   -I"D:\glad\include" ^
   -I"D:\visual_studio\glfw-3.4.bin.WIN64\include" ^

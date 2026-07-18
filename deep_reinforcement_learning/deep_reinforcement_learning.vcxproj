@@ -16,6 +16,15 @@
   <ItemGroup>
     <ClCompile Include="engine.cpp" />
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="data.h" />
+    <ClInclude Include="draw.h" />
+    <ClInclude Include="net.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <CudaCompile Include="draw.cu" />
+    <CudaCompile Include="network.cu" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{8E7FDF29-FC7C-43A4-9395-958D1812DF6B}</ProjectGuid>
     <RootNamespace>deep_reinforcement_learning</RootNamespace>
@@ -72,7 +81,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>WIN32;WIN64;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>D:\visual_studio\noRender\noRender;D:\visual_studio\glfw-3.4.bin.WIN64\include;D:\visual_studio\imgui-1.91.1;D:\visual_studio\imgui-1.91.1\backends;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>D:\visual_studio\noRender\noRender;D:\visual_studio\glfw-3.4.bin.WIN64\include;D:\visual_studio\imgui-1.91.1;D:\visual_studio\imgui-1.91.1\backends;"D:\glad\include";%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
