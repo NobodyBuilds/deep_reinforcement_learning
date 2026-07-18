@@ -10,18 +10,16 @@
 #include <device_launch_parameters.h>
 #include <cuda_gl_interop.h>
 #include <math_constants.h>
+#include <math.h>
 #include "draw.h"
+#include "obstacles.h"
+#include "ui.h"
 
-
-int threads = 256;
-int blocks(int n) {
-    return (n + threads - 1) / threads;
-}
 
 
 static cudaGraphicsResource *carInstRes;
 void registervbo() {
-    unsigned int id = vbo_id.quad_instanced_vbo(settings.cars);
+    unsigned int id = vbo_id.quad_instanced_vbo(settings.cars,1);
     if (id == 0) {
         printf("vbo id is unintitalized \n");
         return;
@@ -36,7 +34,7 @@ void registervbo() {
 }
 
 
-__global__ void registercars(int n, float4* data1,ray* rays, float sx, float sy) {
+__global__ void registercars(int n, float4* data1,ray* rays, float sx, float sy,float dx) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (i >= n)return;
@@ -48,15 +46,17 @@ __global__ void registercars(int n, float4* data1,ray* rays, float sx, float sy)
     d.w = 0.0f;
 
     for (int k = 0; k < 6; k++) {
-        rays[i].len[k] = 50.0f;
+        rays[i].len[k] = dx;
     }
 
 }
 
  __constant__ float d_ray_angles[6];
-void initcars(int n) {
+ 
+void initcars() {
+    int n = settings.cars;
     cudaMemcpyToSymbol(d_ray_angles, ray_angles, sizeof(ray_angles));
-    registercars << <blocks(n), threads >> > (n, data1,rays, settings.spawnx, settings.spawny);
+    registercars << <blocks(n), threads >> > (n, data1,rays, settings.spawnx, settings.spawny,settings.ray_max_len);
     
     printf("cars registered \n");
 
@@ -112,7 +112,7 @@ void loadcardata() {
 
 extern "C" void drawcars() {
     loadcardata();
-    render2d.drawQuadinstancedbyinterop(settings.cars);
+    render2d.drawQuadinstancedbyinterop(settings.cars,1);
 }
 
 
@@ -122,7 +122,7 @@ extern "C" void drawcars() {
 
 static cudaGraphicsResource* raysres;
 extern "C" void registerrayvbo() {
-    unsigned int id = vbo_id.line_instanced_vbo(settings.rays);
+    unsigned int id = vbo_id.line_instanced_vbo(settings.rays,1);
     if (id == 0) {
         printf("ray vbo id is unintitalized \n");
         return;
@@ -179,9 +179,65 @@ void loadraydata() {
 
 extern "C" void drawrays() {
     loadraydata();
-    render2d.drawlineinstancedbyinterop(6);
+    render2d.drawlineinstancedbyinterop(6,1);
     cudaError_t err = cudaGetLastError();
     if (err) {
         printf("draw rays error %s \n", cudaGetErrorString(err));
     }
+}
+
+
+__global__ void moverkernel(int n,float dt, float4* car,float4* data2, float max_steer,float steer_rate,float accelrate,float brakerate,float drag,float maxspeed,float wheelbase) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n)return;
+    float4 d2 = __ldg(&data2[i]);
+    float4 d1 = __ldg(&car[i]);
+
+        float target_steer = d2.y* max_steer;
+    float maxDelta_steer = steer_rate * dt;
+   
+    float delta = fminf(fmaxf(target_steer - d2.w, -maxDelta_steer),maxDelta_steer);
+    data2[i].w = delta;
+
+    float speed = d1.w;
+    float rate = d2.x > 0.0f ? accelrate : brakerate;
+
+    speed += d2.x * rate * dt;
+    speed -= copysignf((drag * speed * speed * dt),speed);
+
+    speed = fminf(fmaxf(speed, -maxspeed * 0.5f), maxspeed);
+
+    float aval = (speed / wheelbase) * tanf(d2.w+delta);//use data2[i].w if any issue
+    float heading = d1.z + aval * dt;
+
+    car[i].x += speed * cosf(heading) * dt;
+    car[i].y += speed * sinf(heading) * dt;
+
+    car[i].z = heading;
+    car[i].w = speed;
+}
+
+__global__ void test(int n, float4* data, float dt, float t, float s) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n)return;
+
+    data[i].x = t;
+    data[i].y = s;
+}
+
+
+extern "C" void stepcars() {
+    test << <blocks(settings.cars), threads >> > (settings.cars, data2, dt, settings.dumx, settings.dumy);
+    moverkernel << <blocks(settings.cars), threads >> > (settings.cars,dt, data1, data2,dparam.max_steer,dparam.steer_rate,dparam.accel_rate,dparam.brake_rate,dparam.drag,dparam.max_speed,dparam.wheelbase);
+}
+
+extern "C" void draw() {
+
+    
+        drawrays();
+        drawcars();
+        drawobstacles();
+        drawdummy();
+        ui_draw();
+    
 }

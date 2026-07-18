@@ -1,0 +1,62 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CudaCompile Include="obstacles.cu">
+      <Filter>obstacles</Filter>
+    </CudaCompile>
+    <CudaCompile Include="network.cu">
+      <Filter>network</Filter>
+    </CudaCompile>
+    <CudaCompile Include="draw.cu">
+      <Filter>draw</Filter>
+    </CudaCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="ui.cpp">
+      <Filter>ui</Filter>
+    </ClCompile>
+    <ClCompile Include="engine.cpp">
+      <Filter>engine</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="ui.h">
+      <Filter>ui</Filter>
+    </ClInclude>
+    <ClInclude Include="obstacles.h">
+      <Filter>obstacles</Filter>
+    </ClInclude>
+    <ClInclude Include="net.h">
+      <Filter>network</Filter>
+    </ClInclude>
+    <ClInclude Include="draw.h">
+      <Filter>draw</Filter>
+    </ClInclude>
+    <ClInclude Include="data.h">
+      <Filter>data</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="compile.bat" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="draw">
+      <UniqueIdentifier>{45d65f10-f9f6-4670-9041-195e5ebf242a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="data">
+      <UniqueIdentifier>{29d166ec-9dac-4338-8a03-d75611f13510}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="engine">
+      <UniqueIdentifier>{779bf21b-121c-4319-86f9-f5f1c5321fcf}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="network">
+      <UniqueIdentifier>{0e90b798-c436-4623-8be9-4879e952fac7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ui">
+      <UniqueIdentifier>{a366d0bf-4e53-45d7-b827-8fc0fa53ef8d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="obstacles">
+      <UniqueIdentifier>{a7639c82-d75c-4197-92a3-71257227fb7e}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>
