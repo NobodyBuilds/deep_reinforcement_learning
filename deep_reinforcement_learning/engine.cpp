@@ -38,7 +38,7 @@ int main() {
 		noRender.clearscreen(0.1f, 0.1f, 0.1f);
 		render2d.drawcircle(settings.targetx, settings.targety, 1.f, 1.f, 0.f, settings.targetsize);
 		stepcars();
-		
+		checkcolison();
 		draw();
 
 		noRender.swapbuffers();

@@ -121,6 +121,23 @@ extern "C" void drawcars() {
 
 
 static cudaGraphicsResource* raysres;
+static cudaGraphicsResource* raysdot;
+
+extern "C" void registerraydotvbo() {
+    unsigned int id = vbo_id.circle_instanced_vbo(settings.rays, 1);
+    if (id == 0) {
+        printf("raydot vbo id is unintitalized \n");
+        return;
+    }
+    cudaError_t err = cudaGraphicsGLRegisterBuffer(&raysdot, id, cudaGraphicsRegisterFlagsWriteDiscard);
+    if (err != cudaSuccess) {
+        printf("raydot vbo registration error %s\n ", cudaGetErrorString(err));
+    }
+    else {
+        printf("raydot vbo registered\n");
+    }
+}
+
 extern "C" void registerrayvbo() {
     unsigned int id = vbo_id.line_instanced_vbo(settings.rays,1);
     if (id == 0) {
@@ -134,11 +151,12 @@ extern "C" void registerrayvbo() {
     else {
         printf("ray vbo registered\n");
     }
+    registerraydotvbo();
 }
 
 
 
-__global__ void fillraydata(int n, linepoint2d* rayvert, ray* rays,float4* data1,int caridx) {
+__global__ void fillraydata(int n, linepoint2d* rayvert,circlevertex2d* dot,const  ray* __restrict__ rays, const float4* __restrict__ data1,int caridx) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int c = caridx;
     if (i >= n)return;
@@ -154,6 +172,13 @@ __global__ void fillraydata(int n, linepoint2d* rayvert, ray* rays,float4* data1
     rayvert[i].r = 1.0f;
     rayvert[i].g = 1.0f;
     rayvert[i].b = 1.0f;
+    float size = 5.0f;
+    dot[i].x = data1[c].x + dx * rays[c].len[i] - (size * 0.5f);
+    dot[i].y = data1[c].y + dy * rays[c].len[i] - (size * 0.5f);
+    dot[i].size = size;
+    dot[i].r = 1.0f;
+    dot[i].g = 1.0f;
+    dot[i].b = 1.0f;
 }
 
 void loadraydata() {
@@ -162,24 +187,41 @@ void loadraydata() {
     if (e != cudaSuccess) {
         printf("ray mapping failed %s \n", cudaGetErrorString(e));
     }
+    cudaError_t te= cudaGraphicsMapResources(1, &raysdot, 0);
+    if (te != cudaSuccess) {
+        printf("raydot mapping failed %s \n", cudaGetErrorString(te));
+    }
+
     linepoint2d* devPtr = nullptr;
+    circlevertex2d* dotdevPtr = nullptr;
     size_t bytes = 0;
+    size_t dotbytes = 0;
+
    cudaError_t er= cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &bytes, raysres);
     if (er != cudaSuccess) {
         printf("ray pointer mapping failed %s \n", cudaGetErrorString(er));
     }
-    fillraydata << <blocks(settings.rays), threads >> > (6,devPtr,rays,data1,1);
+   cudaError_t ter= cudaGraphicsResourceGetMappedPointer((void**)&dotdevPtr, &dotbytes, raysdot);
+    if (ter != cudaSuccess) {
+        printf("raydot pointer mapping failed %s \n", cudaGetErrorString(ter));
+    }
+    fillraydata << <blocks(settings.rays), threads >> > (6,devPtr,dotdevPtr,rays,data1,1);
     cudaDeviceSynchronize();
 
    cudaError_t err= cudaGraphicsUnmapResources(1, &raysres, 0);
     if (err != cudaSuccess) {
         printf("ray unmapping failed %s \n", cudaGetErrorString(err));
     }
+   cudaError_t terr= cudaGraphicsUnmapResources(1, &raysdot, 0);
+    if (terr != cudaSuccess) {
+        printf("raydot unmapping failed %s \n", cudaGetErrorString(terr));
+    }
 }
 
 extern "C" void drawrays() {
     loadraydata();
     render2d.drawlineinstancedbyinterop(6,1);
+    render2d.drawcircleinstancedbyinterop(6, 1);
     cudaError_t err = cudaGetLastError();
     if (err) {
         printf("draw rays error %s \n", cudaGetErrorString(err));
@@ -221,7 +263,7 @@ __global__ void test(int n, float4* data, float dt, float t, float s) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n)return;
 
-    data[i].x = t;
+    data[i].x = t *(i*0.34);
     data[i].y = s;
 }
 
@@ -234,9 +276,9 @@ extern "C" void stepcars() {
 extern "C" void draw() {
 
     
+        drawobstacles();
         drawrays();
         drawcars();
-        drawobstacles();
         drawdummy();
         ui_draw();
     

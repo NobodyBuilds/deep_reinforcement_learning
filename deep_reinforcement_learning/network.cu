@@ -8,6 +8,7 @@ extern "C" void allocate(){
 	cudaMalloc(&data1, n * sizeof(float4));
 	cudaMalloc(&data2, n * sizeof(float4));
 	cudaMalloc(&rays, n * sizeof(ray));
+	cudaMalloc(&segments, settings.max_obstacles * 4 * sizeof(float4));
 
 	cudaMalloc(&alive, n * sizeof(int));
 	printf("data allocated \n");

@@ -60,15 +60,19 @@ inline float ray_angles[6] = {
 struct ray {
 	float len[6];
 };
+
+
 inline float dt = 1.0f / 120.0f;
 inline quadvertex2d* car =nullptr;//allocated in draw.cu
 inline linepoint2d* Rays = nullptr;
 inline quadvertex2d* obstacle = nullptr;
 
 inline float4* data1=nullptr;//posx,posy,heading,speed
-inline float4* data2 = nullptr;//throttle,steer,fitness,current steer
+inline float4* data2 = nullptr;//throttle,steer,survival time,current steer
 inline ray* rays = nullptr;//rays len[6]
 inline int* alive = nullptr;//alive checker
+inline float* fitness = nullptr;
+inline float4* segments = nullptr;
 
 inline int threads = 256;
 inline int blocks(int n) {

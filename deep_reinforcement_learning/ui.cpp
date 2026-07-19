@@ -33,6 +33,7 @@ extern "C" void ui_draw() {
         if (ImGui::Button("add")) {
             addobstacle(settings.obx, settings.oby, settings.obrot, settings.obwidth, settings.obheight);
             resetob();
+            
             settings.addingobstacle = false;
         }
 
