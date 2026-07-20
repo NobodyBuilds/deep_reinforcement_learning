@@ -7,6 +7,8 @@ extern "C" void allocate(){
 	int n = settings.cars;
 	cudaMalloc(&data1, n * sizeof(float4));
 	cudaMalloc(&data2, n * sizeof(float4));
+	cudaMalloc(&fitness, n * sizeof(float));
+	cudaMalloc(&alive, n * sizeof(int));
 	cudaMalloc(&rays, n * sizeof(ray));
 	cudaMalloc(&segments, settings.max_obstacles * 4 * sizeof(float4));
 

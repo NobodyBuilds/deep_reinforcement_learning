@@ -34,16 +34,27 @@ void registervbo() {
 }
 
 
-__global__ void registercars(int n, float4* data1,ray* rays, float sx, float sy,float dx) {
+__global__ void registercars(int n, float4* data1,ray* rays,float4* data2,int* alive,float* fitness, float sx, float sy,float dx) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (i >= n)return;
 
     float4& d = data1[i];
+    float4& d2 = data2[i];
+    float& f = fitness[i];
     d.x = sx;
     d.y = sy;
     d.z = 0.0f;
     d.w = 0.0f;
+
+    d2.x = 0.0f;
+    d2.y = 0.0f;
+    d2.z = 0.0f;
+    d2.w = 0.0f;
+
+    f = 0.0f;
+
+    alive[i] = 1;
 
     for (int k = 0; k < 6; k++) {
         rays[i].len[k] = dx;
@@ -56,16 +67,20 @@ __global__ void registercars(int n, float4* data1,ray* rays, float sx, float sy,
 void initcars() {
     int n = settings.cars;
     cudaMemcpyToSymbol(d_ray_angles, ray_angles, sizeof(ray_angles));
-    registercars << <blocks(n), threads >> > (n, data1,rays, settings.spawnx, settings.spawny,settings.ray_max_len);
+    registercars << <blocks(n), threads >> > (n, data1,rays,data2,alive,fitness, settings.spawnx, settings.spawny,settings.ray_max_len);
     
     printf("cars registered \n");
 
 }
 
+void restartgeneration() {
+    initcars();
+}
 
 
 
-__global__ void fillcardata(int n,quadvertex2d* carvert,float4* data1,float w,float h,float r,float g,float b) {
+
+__global__ void fillcardata(int n,quadvertex2d* carvert,float4* data1,int* alive,float w,float h) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (i >= n)return;
@@ -75,16 +90,23 @@ __global__ void fillcardata(int n,quadvertex2d* carvert,float4* data1,float w,fl
     c.y = d.y;
     c.width = w;
     c.height = h;
-    c.r = r;
-    c.g = g;
-    c.b = b;
+    int a = alive[i];
+    if (a == 2) {
+        c.r = 0.0f; c.g = 1.0f; c.b = 0.0f;   
+    }
+    else if (a == 0) {
+        c.r = 1.0f; c.g = 0.0f; c.b = 0.0f;  
+    }
+    else {
+        c.r = 0.0f; c.g = 0.0f; c.b = 1.0f; 
+    }
     float rot = d.z * (180.0f / CUDART_PI_F);
     if (rot < 0.0f) {
         rot += 360.0f;
     }
-    if (rot > 360.0f) {
+  /*  if (rot > 360.0f) {
         rot = 0.0f;
-    }
+    }*/
     c.rotation = rot;
   
 }
@@ -101,7 +123,7 @@ void loadcardata() {
     if (er != cudaSuccess) {
         printf("car pointer mapping failed %s \n", cudaGetErrorString(er));
     }
-    fillcardata << <blocks(settings.cars), threads >> > (settings.cars,devPtr, data1, settings.carwidth, settings.carheight, settings.car_r, settings.car_g, settings.car_b);
+    fillcardata << <blocks(settings.cars), threads >> > (settings.cars,devPtr, data1,alive, settings.carwidth, settings.carheight);
     cudaDeviceSynchronize();
 
   cudaError_t err=  cudaGraphicsUnmapResources(1, &carInstRes, 0);
@@ -173,8 +195,8 @@ __global__ void fillraydata(int n, linepoint2d* rayvert,circlevertex2d* dot,cons
     rayvert[i].g = 1.0f;
     rayvert[i].b = 1.0f;
     float size = 5.0f;
-    dot[i].x = data1[c].x + dx * rays[c].len[i] - (size * 0.5f);
-    dot[i].y = data1[c].y + dy * rays[c].len[i] - (size * 0.5f);
+    dot[i].x = data1[c].x + dx * rays[c].len[i];
+    dot[i].y = data1[c].y + dy * rays[c].len[i];
     dot[i].size = size;
     dot[i].r = 1.0f;
     dot[i].g = 1.0f;
@@ -229,48 +251,51 @@ extern "C" void drawrays() {
 }
 
 
-__global__ void moverkernel(int n,float dt, float4* car,float4* data2, float max_steer,float steer_rate,float accelrate,float brakerate,float drag,float maxspeed,float wheelbase) {
+__global__ void moverkernel(int n,float dt, float4* car,float4* data2,int* alive, float max_steer,float steer_rate,float accelrate,float brakerate,float drag,float maxspeed,float wheelbase) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n)return;
-    float4 d2 = __ldg(&data2[i]);
-    float4 d1 = __ldg(&car[i]);
 
-        float target_steer = d2.y* max_steer;
-    float maxDelta_steer = steer_rate * dt;
-   
-    float delta = fminf(fmaxf(target_steer - d2.w, -maxDelta_steer),maxDelta_steer);
-    data2[i].w = delta;
+    if (alive[i] == 1) {
+        float4 d2 = __ldg(&data2[i]);
+        float4 d1 = __ldg(&car[i]);
 
-    float speed = d1.w;
-    float rate = d2.x > 0.0f ? accelrate : brakerate;
+        float target_steer = (d2.y * (CUDART_PI_F / 180.0f)) * max_steer;
+        float maxDelta_steer = steer_rate * (CUDART_PI_F / 180.0f) * dt;
 
-    speed += d2.x * rate * dt;
-    speed -= copysignf((drag * speed * speed * dt),speed);
+        float delta = fminf(fmaxf(target_steer - d2.w, -maxDelta_steer), maxDelta_steer);
+        data2[i].w += delta;
 
-    speed = fminf(fmaxf(speed, -maxspeed * 0.5f), maxspeed);
+        float speed = d1.w;
+        float rate = d2.x > 0.0f ? accelrate : brakerate;
 
-    float aval = (speed / wheelbase) * tanf(d2.w+delta);//use data2[i].w if any issue
-    float heading = d1.z + aval * dt;
+        speed += d2.x * rate * dt;
+        speed -= copysignf((drag * speed * speed * dt), speed);
 
-    car[i].x += speed * cosf(heading) * dt;
-    car[i].y += speed * sinf(heading) * dt;
+        speed = fminf(fmaxf(speed, -maxspeed * 0.5f), maxspeed);
 
-    car[i].z = heading;
-    car[i].w = speed;
+        float aval = (speed / wheelbase) * tanf(data2[i].w);//use data2[i].w if any issue
+        float heading = d1.z + aval * dt;
+
+        car[i].x += speed * cosf(heading) * dt;
+        car[i].y += speed * sinf(heading) * dt;
+
+        car[i].z = heading;
+        car[i].w = speed;
+    }
 }
 
 __global__ void test(int n, float4* data, float dt, float t, float s) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n)return;
 
-    data[i].x = t *(i*0.34);
+    data[i].x = t ;
     data[i].y = s;
 }
 
 
 extern "C" void stepcars() {
-    test << <blocks(settings.cars), threads >> > (settings.cars, data2, dt, settings.dumx, settings.dumy);
-    moverkernel << <blocks(settings.cars), threads >> > (settings.cars,dt, data1, data2,dparam.max_steer,dparam.steer_rate,dparam.accel_rate,dparam.brake_rate,dparam.drag,dparam.max_speed,dparam.wheelbase);
+    test << <blocks(settings.cars), threads >> > (settings.cars, data2, settings.dt, settings.dumx, settings.dumy);
+    moverkernel << <blocks(settings.cars), threads >> > (settings.cars,settings.dt, data1, data2,alive,dparam.max_steer,dparam.steer_rate,dparam.accel_rate,dparam.brake_rate,dparam.drag,dparam.max_speed,dparam.wheelbase);
 }
 
 extern "C" void draw() {

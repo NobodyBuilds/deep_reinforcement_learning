@@ -10,10 +10,12 @@
 #include <vector>
 #include <cuda_device_runtime_api.h>
 #include <device_launch_parameters.h>
+#include <cmath>
+#include <math.h>
 __constant__ float d2_ray_angles[6];
 //render obstacles
 cudaGraphicsResource* obstaclesRes;
-
+std::vector<quadvertex2d> h_obdata;
 extern "C" void registerObstaclesVbo() {
 
     
@@ -78,16 +80,44 @@ extern "C" void drawobstacles() {
     }
 }
 
+std::vector<float> obx = { 900.0f, 5.0f, 900.0f, 1795.0f, 900.0f, 680.0f, 640.0f, 1150.0f, 680.0f, 833.0f, 900.0f, 995.0f, 900.0f, 1602.0f, 1321.0f, 1408.0f, 1360.0f };
+
+std::vector<float> oby  = { 895.0f, 450.0f, 5.0f, 450.0f, 280.0f, 650.0f, 125.0f, 320.0f, 290.0f, 420.0f, 204.0f, 656.0f, 876.0f, 516.0f, 682.0f, 418.0f, 176.0f };
+std::vector<float> obw  = { 1800.0f, 10.0f, 1800.0f, 10.0f, 130.0f, 50.0f, 50.0f, 50.0f, 50.0f, 147.0f, 50.0f, 148.0f, 50.0f, 380.0f, 200.0f, 50.0f, 118.0f };
+std::vector<float> obh  = { 10.0f, 900.0f, 10.0f, 900.0f, 150.0f, 480.0f, 320.0f, 630.0f, 50.0f, 50.0f, 162.0f, 148.0f, 154.0f, 50.0f, 185.0f, 303.0f, 196.0f };
+std::vector<float> obr  = { 0.0f, 0.0f, 0.0f, 0.0f, 45.0f, 0.0f, 43.0f, 0.0f, 37.0f, 0.0f, 0.0f, 32.5f, 0.0f, 0.0f, 36.2f, 0.0f, 82.6f };
+void preaddobstacle() {
+    for (int i = 0; i < obx.size(); i++) {
+
+
+        quadvertex2d c;
+        c.x = obx[i];
+        c.y = oby[i];
+        c.width = obw[i];
+        c.height = obh[i];
+        c.rotation = obr[i];
+        c.r = 0.2f;
+        c.g = 0.2f;
+        c.b = 0.2f;
+
+        h_obdata.push_back(c);
+        settings.obstacles++;
+    }
+}
 
 extern "C" void initobstacles() {
     cudaMemcpyToSymbol(d2_ray_angles, ray_angles, sizeof(ray_angles));
     cudaMalloc(&obstacle, settings.max_obstacles * sizeof(quadvertex2d));
+    //add obstacles pre defined
+    preaddobstacle();
+    
 
 
+    copyobsdata();
+    bake_segments();
 }
 
 //add obstacles
-std::vector<quadvertex2d> h_obdata;
 
 extern "C" void copyobsdata() {
     cudaMemcpy(obstacle, h_obdata.data(), settings.obstacles * sizeof(quadvertex2d), cudaMemcpyHostToDevice);
@@ -249,3 +279,88 @@ extern "C" void checkcolison() {
 }
 
 
+__constant__ float d_rayexitdist[6];
+
+float rayexitdist[6];
+
+extern "C" void setrayexitdist() {
+
+    float hh = settings.carheight * 0.5f;
+    float hw = settings.carwidth * 0.5f;
+
+    for (int i = 0; i < 6; i++) {
+        float c = fabsf(cosf(ray_angles[i]));
+        float s = fabsf(sinf(ray_angles[i]));
+        float tx = (c > 1e-6f) ? hw / c : INFINITY;
+        float ty = (s > 1e-6f) ? hh / s : INFINITY;
+        
+       
+        rayexitdist[i] = fminf(tx,ty);
+    }
+    cudaMemcpyToSymbol(d_rayexitdist, rayexitdist,  sizeof(rayexitdist));
+}
+
+__device__ int d_deadCount;
+__global__ void checkstatekernel(int n,int* alive,float4* data1,float4* data2, ray* rays ,float time,float tx,float ty,float size) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) {
+        return;
+    }
+
+    if (alive[i] == 1) {
+
+        float4 c = __ldg(&data1[i]);
+        float dx = tx - c.x;
+        float dy = ty - c.y;
+        float dist = sqrtf(dx * dx + dy * dy);
+        bool dead = false;
+        int newState = alive[i];
+        for (int k = 0; k < 6; k++) {
+            //check wall colison
+            float len = rays[i].len[k];
+
+            //checkif car rached target
+            if (dist - d_rayexitdist[k] <= size * 0.5f) {
+                newState = 2;
+                dead = true; 
+
+
+            }
+            else if (len <= d_rayexitdist[k]) {
+                newState = 0;
+                dead = true; 
+               
+            }
+
+
+        }
+
+        if (dead) {
+            alive[i] = newState;
+            data2[i].z = time;
+            atomicAdd(&d_deadCount, 1);
+        }
+    }
+
+    
+}
+
+extern "C" void checkstate() {
+    checkstatekernel << <blocks(settings.cars), threads >> > (settings.cars, alive, data1, data2, rays, settings.timer, settings.targetx, settings.targety, settings.targetsize);
+    cudaError_t er = cudaGetLastError();
+    if (er) {
+        printf("checkstate kernel error %s\n", cudaGetErrorString(er));
+    }
+    int dcount = 0;
+    cudaMemcpyFromSymbol(&dcount, d_deadCount, sizeof(int));
+    cudaError_t err = cudaGetLastError();
+    if (err) {
+        printf("no alive device to host copy error %s\n", cudaGetErrorString(err));
+    }
+    if (dcount == settings.cars) {
+        noalive = true;
+       // printf("noalive \n");
+    }
+    int zero = 0;
+    cudaMemcpyToSymbol(d_deadCount, &zero, sizeof(int));
+}

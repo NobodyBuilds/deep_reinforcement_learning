@@ -9,12 +9,16 @@
 #include "ui.h"
 #include "imgui_impl_opengl3.h"
 #include "obstacles.h"
+#include <chrono>
 
 
+	
 
 int main() {
 	noRender.createWindow(1800, 900, "car learns to drive", 0);
 	noRender.setup2d();
+
+	
 	//imgui
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
@@ -31,17 +35,55 @@ int main() {
 	allocate();
 	initcars();
 	initobstacles();
+	setrayexitdist();
 
+	double lastTime = glfwGetTime();
+	double fpsClock = lastTime;
 	while (noRender.WindowOpen()) {
-
+		
+		double now = glfwGetTime();
+		double frameTime = now - lastTime;
+		lastTime = now;
+		settings.accumulator += (float)frameTime;
+		settings.timer += frameTime;
+		
 		noRender.processinputs();
 		noRender.clearscreen(0.1f, 0.1f, 0.1f);
 		render2d.drawcircle(settings.targetx, settings.targety, 1.f, 1.f, 0.f, settings.targetsize);
-		stepcars();
-		checkcolison();
+		settings.effectiveDt = fminf(settings.accumulator, settings.dt * 4.0f);
+
+		while (settings.accumulator >= settings.dt)
+		{
+			stepcars();
+			checkcolison();
+			checkstate();
+
+			settings.accumulator -= settings.dt;
+		}
+
+
 		draw();
 
+		if (settings.timer >= 20.0f || noalive ) {
+			settings.timer = 0.0f;
+			settings.gen++;
+			noalive = false;
+			restartgeneration();
+		}
+
 		noRender.swapbuffers();
+
+		double elapsed = now - fpsClock;
+		fpsClock = now;
+		settings.fps = (elapsed > 0.0) ? 1.0 / elapsed : settings.fps;
+		settings.fpsTimer += (float)elapsed;
+		settings.fpsCount++;
+		
+		if (settings.fpsTimer >= 0.5f) {
+			settings.avgFps = settings.fpsCount / settings.fpsTimer;
+			settings.fpsTimer = 0.f;
+			settings.fpsCount = 0;
+		}
 
 	}
 

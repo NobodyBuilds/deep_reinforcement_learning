@@ -8,4 +8,5 @@ extern "C" {
 	void drawrays();
 	void stepcars();
 	void draw();
+	void restartgeneration();
 }

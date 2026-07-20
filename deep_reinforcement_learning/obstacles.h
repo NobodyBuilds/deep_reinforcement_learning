@@ -10,4 +10,7 @@ extern "C" {
 	void resetob();
 	void bake_segments();
 	void checkcolison();
+	void copyobsdata();
+	void checkstate();
+	void setrayexitdist();
 }
