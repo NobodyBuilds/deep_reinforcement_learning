@@ -45,17 +45,19 @@ int main() {
 		double frameTime = now - lastTime;
 		lastTime = now;
 		settings.accumulator += (float)frameTime;
-		settings.timer += frameTime;
+		//settings.timer += frameTime;
 		
 		noRender.processinputs();
 		noRender.clearscreen(0.1f, 0.1f, 0.1f);
 		render2d.drawcircle(settings.targetx, settings.targety, 1.f, 1.f, 0.f, settings.targetsize);
-		settings.effectiveDt = fminf(settings.accumulator, settings.dt * 4.0f);
+		
 
+		settings.accumulator += frameTime * settings.trainspeed;
 		getbestcaridx();
 		while (settings.accumulator >= settings.dt)
 		{
 			stepcars();
+			settings.timer += settings.dt;
 			checkcolison();
 			checkstate();
 
@@ -64,7 +66,7 @@ int main() {
 
 		draw();
 
-		if (settings.timer >= 20.0f || noalive ) {
+		if (settings.timer >= 30.0f || noalive ) {
 			settings.timer = 0.0f;
 			settings.gen++;
 			noalive = false;
@@ -89,13 +91,13 @@ int main() {
 	}
 	unregister();
 	unregisterobs();
-
+	clearvectors();
 	cudafree();
 	ImGui_ImplOpenGL3_Shutdown();
 	ImGui_ImplGlfw_Shutdown();
 	ImGui::DestroyContext();
 	noRender.closeWindow();
-	std::cin.get();
+	//std::cin.get();
 	return 0;
 
 }

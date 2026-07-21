@@ -10,4 +10,5 @@ extern "C" {
 	void runnet();
 	void cudafree();
 	void restart();
+	void mutation();
 }

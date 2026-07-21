@@ -19,6 +19,8 @@ struct ddata {
 	float maxdisttotarget;
 	float targetx;
 	float taregety;
+	float spawnx;
+	float spawny;
 	float degtorad;
 	int numcars;
 	int layers;
@@ -35,6 +37,8 @@ void setconst() {
 	h.numcars = settings.cars;
 	h.targetx = settings.targetx;
 	h.taregety = settings.targety;
+	h.spawnx = settings.spawnx;
+	h.spawny = settings.spawny;
 
 	cudaMemcpyToSymbol(d, &h, sizeof(ddata));
 	cudaError_t err = cudaGetLastError();
@@ -72,17 +76,27 @@ __global__ void fitnesskernel(int n,const float4* __restrict__ data1,const float
 	float dx = tx - c.x;
 	float dy = ty - c.y;
 	float cudist = sqrtf(dx * dx + dy * dy);
+
+	float sx = d.spawnx - c.x;
+	float sy = d.spawny - c.y;
+
+	float sdist = sqrtf(sx * sx + sy * sy);
+
 	float val = 0.0f;
 	if (a == 2) {
-		val = 100.0f;
+		val = 1000.0f;
 	}
 	else if (a == 0) {
-		val = -150.0f;
+		val = -100.0f;
+	}else{
+		val = 5.0f;
 	}
 
-	fitness[i] = (maxdt - cudist) 
-		+val
-		- d2.z; //time taken
+	fitness[i] = ((maxdt - cudist) * 10.0f) 
+		+ sdist
+		+ val 
+		+ (c.w * 2.0f)
+		- d2.z * 10.0f; //time taken
 
 
 
@@ -116,28 +130,16 @@ void bitonicsort() {
 	}
 }
 __device__ float fit;
-__global__ void te(int* indices, float* fitness) {
-	fit = fitness[0];
+
+__global__ void te(int s, float* fitness) {
+	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	if (i >= s)return;
+
+	float f = fitness[i];
+	
+	atomicAdd(&fit, f);
 	
 }
-void computefitness() {
-
-	fitnesskernel << <blocks(settings.cars), threads >> > (settings.cars, data1, data2, alive, fitness, settings.maxdisttotarget, settings.targetx, settings.targety);
-	bitonicsort();
-
-	te << <1, 1 >> > (indices, fitness);
-	float hfit = 0.0f;
-	cudaMemcpyFromSymbol(&hfit, fit, sizeof(float));
-	settings.fitness = hfit;
-
-}
-void setmaxdisttotarget() {
-	float dx = settings.spawnx - settings.targetx;
-	float dy = settings.spawny - settings.targety;
-
-	settings.maxdisttotarget = sqrtf(dx * dx + dy * dy);
-}
-
 __global__ void fillindices(int n, int* indices) {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= n)
@@ -145,6 +147,37 @@ __global__ void fillindices(int n, int* indices) {
 	indices[i] = i;
 
 }
+
+void computefitness() {
+
+	fitnesskernel << <blocks(settings.cars), threads >> > (settings.cars, data1, data2, alive, fitness, settings.maxdisttotarget, settings.targetx, settings.targety);
+	
+	
+
+	fillindices << <blocks(settings.cars), threads >> > (settings.cars, indices);
+	
+	bitonicsort();
+	int zero = 0.0f;
+	cudaMemcpyToSymbol(fit, &zero, sizeof(float));
+	te << <blocks(settings.cars),threads >> > (settings.cars, fitness);
+	float hfit = 0.0f;
+	cudaMemcpyFromSymbol(&hfit, fit, sizeof(float));
+	
+	float afit = hfit / settings.cars;
+	settings.fitness = afit;
+	fitgraph.push_back(afit);
+	
+	mutation();
+
+}
+void setmaxdisttotarget() {
+	float dx = settings.spawnx - settings.targetx;
+	float dy = settings.spawny - settings.targety;
+	
+
+	settings.maxdisttotarget = sqrtf(dx * dx + dy * dy);
+}
+
 
 
 __device__ unsigned long long gidx;
@@ -421,6 +454,76 @@ void copywbtogpu() {
 
 
 void mutation() {
+	int top10 = settings.cars / 10;
+	cudaError_t err;
+	
+	if (top10 == 0|| settings.cars <10) {
+		return;
+	}
+
+	cudaMemcpy(tempweights.data(), d_weights, weightbuffersize * sizeof(float), cudaMemcpyDeviceToHost);
+	cudaMemcpy(tempbias.data(), d_bias, biassize * sizeof(float), cudaMemcpyDeviceToHost);
+	cudaMemcpy(tempindices.data(), indices, settings.cars * sizeof(int), cudaMemcpyDeviceToHost);
+	err = cudaGetLastError();
+	if (err) {
+		printf("weight cpy to host failed :%s\n", cudaGetErrorString(err));
+		return;
+	}
+	int w = weightbuffersize / settings.cars;
+	int b = biassize / settings.cars;
+	int n = settings.cars;
+	//copy best performers extactly
+	for (int i = 0; i < top10; i++) {
+		int I = tempindices[i];
+
+		for (int j = 0; j < w; j++) {
+			weights[j * n + i] = tempweights[j * n + I];
+		}
+		for (int j = 0; j < b; j++) {
+			bias[j*n+i] = tempbias[j*n+I ];
+		}
+
+	}
+	std::mt19937 rng(std::random_device{}());
+	std::uniform_real_distribution<float> W(-0.2f, 0.2f);
+	std::uniform_real_distribution<float> B(-0.2f, 0.2f);
+	
+	std::uniform_int_distribution<int> dice(0, top10-1);
+
+	
+	//mutate rest population 
+	for (int i = top10; i < settings.cars; i++) {
+		for (int j = 0; j < w; j++) {
+			int x = dice(rng);
+			int p = tempindices[x];
+			float variation= W(rng);
+			weights[j*n + i] = tempweights[j * n + p] ;
+			weights[j * n + i] += variation;
+		}
+		for (int j = 0; j < b; j++) {
+			int x = dice(rng);
+			int p = tempindices[x];
+			float variation =B(rng);
+			bias[j*n+i ] = tempbias[j * n + p];
+			bias[j*n+i ] += variation;
+
+		}
+	}
+
+
+
+	cudaMemcpy(d_weights, weights.data(), weightbuffersize * sizeof(float),cudaMemcpyHostToDevice);
+	cudaMemcpy(d_bias, bias.data(), biassize * sizeof(float),cudaMemcpyHostToDevice);
+
+	err = cudaGetLastError();
+	if (err) {
+		printf(" mutated weight memcpy failed :%s \n", cudaGetErrorString(err));
+		return;
+	}
+
+
+	
+
 
 }
 
@@ -429,6 +532,7 @@ void restart() {
 	unregister();
 	unregisterobs();
 	cudafree();
+	fitgraph.clear();
 	printf("memfree on restart \n");
 	weightbuffersize = 0;
 	biassize = 0;
@@ -459,7 +563,7 @@ void restart() {
 void initnetwork() {
 	initlayers();
 	setoffsets();
-	initWB(-0.5f, 0.5f);
+	initWB(-0.2f, 0.2f);
 	allocatenetmem();
 	copywbtogpu();
 	allocate();
@@ -467,6 +571,10 @@ void initnetwork() {
 
 	fillindices << <blocks(settings.cars), threads >> > (settings.cars, indices);
 	setconst();
+
+	tempweights.resize(weightbuffersize);
+	tempbias.resize(biassize);
+	tempindices.resize(settings.cars);
 
 }
 

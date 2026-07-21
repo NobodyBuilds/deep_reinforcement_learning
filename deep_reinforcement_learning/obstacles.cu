@@ -303,7 +303,7 @@ extern "C" void setrayexitdist() {
         }
 }
 
-__device__ int d_deadCount;
+__device__ int dreached;
 __global__ void checkstatekernel(int n,int* alive,float4* data1,float4* data2, ray* rays ,float time,float tx,float ty,float size) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n) {
@@ -326,7 +326,7 @@ __global__ void checkstatekernel(int n,int* alive,float4* data1,float4* data2, r
             if (dist - d_rayexitdist[k] <= size * 0.5f) {
                 newState = 2;
                 dead = true; 
-
+                atomicAdd(&dreached, 1);
 
             }
             else if (len <= d_rayexitdist[k]) {
@@ -341,7 +341,7 @@ __global__ void checkstatekernel(int n,int* alive,float4* data1,float4* data2, r
         if (dead) {
             alive[i] = newState;
             data2[i].z = time;
-            atomicAdd(&d_deadCount, 1);
+           
         }
     }
 
@@ -349,24 +349,17 @@ __global__ void checkstatekernel(int n,int* alive,float4* data1,float4* data2, r
 }
 
 extern "C" void checkstate() {
+    int zero = 0;
+    cudaMemcpyToSymbol(dreached, &zero, sizeof(int));
     checkstatekernel << <blocks(settings.cars), threads >> > (settings.cars, alive, data1, data2, rays, settings.timer, settings.targetx, settings.targety, settings.targetsize);
     cudaError_t er = cudaGetLastError();
     if (er) {
         printf("checkstate kernel error %s\n", cudaGetErrorString(er));
     }
-    int dcount = 0;
-    cudaMemcpyFromSymbol(&dcount, d_deadCount, sizeof(int));
-    cudaError_t err = cudaGetLastError();
-    if (err) {
-        printf("no alive device to host copy error %s\n", cudaGetErrorString(err));
-    }
-    settings.alivecount = settings.cars - dcount;
-    if (dcount == settings.cars) {
-        noalive = true;
-       // printf("noalive \n");
-    }
-    int zero = 0;
-    cudaMemcpyToSymbol(d_deadCount, &zero, sizeof(int));
+    int c = 0;
+    cudaMemcpyFromSymbol(&c, dreached, sizeof(int));
+    settings.reached = c;
+   
 }
 
 void unregisterobs() {

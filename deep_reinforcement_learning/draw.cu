@@ -75,7 +75,8 @@ void initcars() {
 }
 
 void restartgeneration() {
-    initcars();
+    int n = settings.cars;
+    registercars << <blocks(n), threads >> > (n, data1, rays, data2, alive, fitness, settings.spawnx, settings.spawny, settings.ray_max_len);
 }
 
 
