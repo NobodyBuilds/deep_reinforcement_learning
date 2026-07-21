@@ -4,6 +4,14 @@
 #include <norender.h>
 #include <cuda_runtime.h>
 
+ struct Layer {
+	int Nin;
+	int Nout;
+	int wIdx;
+	int dIdx;
+	int bIdx;
+
+};
 
 struct param {
 	//car setup data
@@ -17,8 +25,8 @@ struct param {
 	float targetsize = 40.0f;
 	float dumx = 0.0, dumy = 0.0f;
 	float ray_max_len = 75.0f;
-
-
+	float maxdisttotarget = 0.0f;
+	float fitness = 0.0f;
 	float fps = 0.0f;
 	float avgFps = 0.0f;
 	float fpsTimer = 0.0f;
@@ -30,14 +38,19 @@ struct param {
 	float obrot = 0.0f;
 	float obwidth = 50.0f;
 	float obheight = 50.0f;
+	float gentime = 20.0f;
 	int gen = 1;
 	int fpsCount = 0;
-	int cars = 5;
+	int cars =64 ;
+	int samplecar = 64;
 	int rays = 6;
-	int dupecars = 5;
+	int layers = 0;
+	int alivecount = 0;
 	int obstacles = 0;
 	int max_obstacles = 64;
+	int bestcaridx = 0;
 	bool addingobstacle = false;
+
 	
 };
 
@@ -84,9 +97,20 @@ inline float4* data2 = nullptr;//throttle,steer,survival time,current steer
 inline ray* rays = nullptr;//rays len[6]
 inline int* alive = nullptr;//alive checker
 inline float* fitness = nullptr;
+inline int* indices = nullptr;
 inline float4* segments = nullptr;
+
+inline float* d_weights = nullptr;
+inline float* d_bias = nullptr;
+inline float* d_nodvals = nullptr;
+inline Layer* dlayer = nullptr;
 
 inline int threads = 256;
 inline int blocks(int n) {
 	return (n + threads - 1) / threads;
-}
+};
+
+inline std::vector<Layer> layerdata;
+inline std::vector<float>weights;
+inline std::vector<float>bias;
+inline std::vector<quadvertex2d> h_obdata;

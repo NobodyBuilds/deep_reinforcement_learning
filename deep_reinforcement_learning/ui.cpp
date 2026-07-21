@@ -5,6 +5,7 @@
 #include "ui.h"
 #include "data.h"
 #include "obstacles.h"
+#include "net.h"
 extern "C" void ui_draw() {
   
     ImGui_ImplOpenGL3_NewFrame();
@@ -15,14 +16,22 @@ extern "C" void ui_draw() {
     ImGui::Text("fps: %3f  time: %3f", settings.avgFps, settings.timer);
     ImGui::Spacing();
     ImGui::Text("Gen: %d ", settings.gen);
+    ImGui::Text("cars: %d alive: %d", settings.cars,settings.alivecount);
+    ImGui::Text("fitness %f", settings.fitness);
+    ImGui::InputInt("cars %d", &settings.samplecar);
+    if (ImGui::Button("restart")) {
+        restart();
+        settings.cars = settings.samplecar;
+        settings.gen = 1;
+        settings.fitness = 0.0f;
+        settings.timer = 0.0f;
+    }
     ImGui::Text("target");
     ImGui::DragFloat("pos x %f",&settings.targetx, 1.f, 0.0f, 5000.0f);
     ImGui::DragFloat("pos y %f",&settings.targety, 1.f, 0.0f, 5000.0f);
     ImGui::DragFloat("size %f",&settings.targetsize, 0.1f, 0.0f, 5000.0f);
     ImGui::Spacing();
-    ImGui::DragFloat("car x %f",&settings.dumx, 0.01f, -1.0f, 1.0f);
-    ImGui::DragFloat("car y %f",&settings.dumy, 0.01f, -1.0f, 1.0f);
-    ImGui::DragFloat("steer %f ", &dparam.steer_rate, 0.10f, 0.0f, 360.0f);
+    
     ImGui::Spacing();
     ImGui::Checkbox("add obstacle", &settings.addingobstacle);
     if (settings.addingobstacle) {

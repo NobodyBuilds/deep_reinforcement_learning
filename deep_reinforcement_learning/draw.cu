@@ -14,6 +14,7 @@
 #include "draw.h"
 #include "obstacles.h"
 #include "ui.h"
+#include "net.h"
 
 
 
@@ -227,7 +228,7 @@ void loadraydata() {
     if (ter != cudaSuccess) {
         printf("raydot pointer mapping failed %s \n", cudaGetErrorString(ter));
     }
-    fillraydata << <blocks(settings.rays), threads >> > (6,devPtr,dotdevPtr,rays,data1,1);
+    fillraydata << <blocks(settings.rays), threads >> > (6,devPtr,dotdevPtr,rays,data1,settings.bestcaridx);
     cudaDeviceSynchronize();
 
    cudaError_t err= cudaGraphicsUnmapResources(1, &raysres, 0);
@@ -284,18 +285,16 @@ __global__ void moverkernel(int n,float dt, float4* car,float4* data2,int* alive
     }
 }
 
-__global__ void test(int n, float4* data, float dt, float t, float s) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= n)return;
-
-    data[i].x = t ;
-    data[i].y = s;
-}
 
 
 extern "C" void stepcars() {
-    test << <blocks(settings.cars), threads >> > (settings.cars, data2, settings.dt, settings.dumx, settings.dumy);
+    runnet();
+   // test << <blocks(settings.cars), threads >> > (settings.cars, data2, settings.dt, settings.dumx, settings.dumy);
     moverkernel << <blocks(settings.cars), threads >> > (settings.cars,settings.dt, data1, data2,alive,dparam.max_steer,dparam.steer_rate,dparam.accel_rate,dparam.brake_rate,dparam.drag,dparam.max_speed,dparam.wheelbase);
+    cudaError_t err = cudaGetLastError();
+    if (err) {
+        printf("stepcars failed %s \n", cudaGetErrorString(err));
+    }
 }
 
 extern "C" void draw() {
@@ -307,4 +306,20 @@ extern "C" void draw() {
         drawdummy();
         ui_draw();
     
+}
+
+void unregister() {
+    if (carInstRes) {
+        cudaGraphicsUnregisterResource(carInstRes);
+        carInstRes = nullptr;
+    }
+    if (raysres) {
+        cudaGraphicsUnregisterResource(raysres);
+        raysres = nullptr;
+    }
+
+    if (raysdot) {
+        cudaGraphicsUnregisterResource(raysdot);
+        raysdot = nullptr;
+    }
 }

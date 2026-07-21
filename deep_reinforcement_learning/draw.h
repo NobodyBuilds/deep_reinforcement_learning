@@ -9,4 +9,5 @@ extern "C" {
 	void stepcars();
 	void draw();
 	void restartgeneration();
+	void unregister();
 }

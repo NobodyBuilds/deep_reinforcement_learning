@@ -13,4 +13,6 @@ extern "C" {
 	void copyobsdata();
 	void checkstate();
 	void setrayexitdist();
+	void unregisterobs();
+	void clearvectors();
 }

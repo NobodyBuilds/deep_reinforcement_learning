@@ -32,7 +32,7 @@ int main() {
 	registervbo();
 	registerObstaclesVbo();
 	registerrayvbo();
-	allocate();
+	initnetwork();
 	initcars();
 	initobstacles();
 	setrayexitdist();
@@ -52,6 +52,7 @@ int main() {
 		render2d.drawcircle(settings.targetx, settings.targety, 1.f, 1.f, 0.f, settings.targetsize);
 		settings.effectiveDt = fminf(settings.accumulator, settings.dt * 4.0f);
 
+		getbestcaridx();
 		while (settings.accumulator >= settings.dt)
 		{
 			stepcars();
@@ -61,13 +62,13 @@ int main() {
 			settings.accumulator -= settings.dt;
 		}
 
-
 		draw();
 
 		if (settings.timer >= 20.0f || noalive ) {
 			settings.timer = 0.0f;
 			settings.gen++;
 			noalive = false;
+			computefitness();
 			restartgeneration();
 		}
 
@@ -86,13 +87,15 @@ int main() {
 		}
 
 	}
+	unregister();
+	unregisterobs();
 
-
+	cudafree();
 	ImGui_ImplOpenGL3_Shutdown();
 	ImGui_ImplGlfw_Shutdown();
 	ImGui::DestroyContext();
 	noRender.closeWindow();
-
+	std::cin.get();
 	return 0;
 
 }

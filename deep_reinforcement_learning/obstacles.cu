@@ -15,7 +15,6 @@
 __constant__ float d2_ray_angles[6];
 //render obstacles
 cudaGraphicsResource* obstaclesRes;
-std::vector<quadvertex2d> h_obdata;
 extern "C" void registerObstaclesVbo() {
 
     
@@ -298,6 +297,10 @@ extern "C" void setrayexitdist() {
         rayexitdist[i] = fminf(tx,ty);
     }
     cudaMemcpyToSymbol(d_rayexitdist, rayexitdist,  sizeof(rayexitdist));
+    cudaError_t err = cudaGetLastError();
+        if (err) {
+            printf(" setrayexit error %s \n", cudaGetErrorString(err));
+        }
 }
 
 __device__ int d_deadCount;
@@ -357,10 +360,26 @@ extern "C" void checkstate() {
     if (err) {
         printf("no alive device to host copy error %s\n", cudaGetErrorString(err));
     }
+    settings.alivecount = settings.cars - dcount;
     if (dcount == settings.cars) {
         noalive = true;
        // printf("noalive \n");
     }
     int zero = 0;
     cudaMemcpyToSymbol(d_deadCount, &zero, sizeof(int));
+}
+
+void unregisterobs() {
+    if (obstaclesRes) {
+        cudaGraphicsUnregisterResource(obstaclesRes);
+        obstaclesRes = nullptr;
+    }
+}
+
+
+void clearvectors() {
+    weights.clear();
+    bias.clear();
+    layerdata.clear();
+    h_obdata.clear();
 }
