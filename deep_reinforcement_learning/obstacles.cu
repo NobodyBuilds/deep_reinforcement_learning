@@ -303,62 +303,72 @@ extern "C" void setrayexitdist() {
         }
 }
 
-__device__ int dreached;
-__global__ void checkstatekernel(int n,int* alive,float4* data1,float4* data2, ray* rays ,float time,float tx,float ty,float size) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= n) {
-        return;
-    }
+__device__ bool Alive;
+__global__ void checkstatekernel(int* alive,float4* data1,float4* data2, ray* rays ,float time,float tx,float ty,float size) {
+    
+    bool win = false;
+    if (alive[0] == 1) {
 
-    if (alive[i] == 1) {
-
-        float4 c = __ldg(&data1[i]);
+        float4 c = __ldg(&data1[0]);
         float dx = tx - c.x;
         float dy = ty - c.y;
         float dist = sqrtf(dx * dx + dy * dy);
         bool dead = false;
-        int newState = alive[i];
+        int newState = alive[0];
         for (int k = 0; k < 6; k++) {
-            //check wall colison
-            float len = rays[i].len[k];
+           // float len = rays[i].len[k];
 
-            //checkif car rached target
             if (dist - d_rayexitdist[k] <= size * 0.5f) {
                 newState = 2;
-                dead = true; 
-                atomicAdd(&dreached, 1);
+                dead = true;
+                win = true;
+             
+                break;
 
             }
-            else if (len <= d_rayexitdist[k]) {
-                newState = 0;
-                dead = true; 
-               
-            }
-
-
         }
+            if (!win) {
+                for (int k = 0; k < 6; k++) {
+                    if (rays[0].len[k] <= d_rayexitdist[k]) {
+                        newState = 0; dead = true;
+                        break;
+                    }
+                }
+            }
+
+
+        
 
         if (dead) {
-            alive[i] = newState;
-            data2[i].z = time;
+            alive[0] = newState;
+            Alive = false;
            
         }
+        else {
+            Alive = true;
+        }
+        data2[0].z = time;
+
+       
+        
     }
 
     
 }
 
 extern "C" void checkstate() {
-    int zero = 0;
-    cudaMemcpyToSymbol(dreached, &zero, sizeof(int));
-    checkstatekernel << <blocks(settings.cars), threads >> > (settings.cars, alive, data1, data2, rays, settings.timer, settings.targetx, settings.targety, settings.targetsize);
+    
+   
+  
+ 
+    checkstatekernel << <1, 1 >> > ( alive, data1, data2, rays, settings.timer, settings.targetx, settings.targety, settings.targetsize);
     cudaError_t er = cudaGetLastError();
     if (er) {
         printf("checkstate kernel error %s\n", cudaGetErrorString(er));
     }
-    int c = 0;
-    cudaMemcpyFromSymbol(&c, dreached, sizeof(int));
-    settings.reached = c;
+    bool a = true;
+    cudaMemcpyFromSymbol(&a, Alive, sizeof(bool));
+    settings.alive = a;
    
 }
 

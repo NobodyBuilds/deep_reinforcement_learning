@@ -10,4 +10,5 @@ extern "C" {
 	void draw();
 	void restartgeneration();
 	void unregister();
+	
 }

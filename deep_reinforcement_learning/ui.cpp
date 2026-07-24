@@ -21,35 +21,33 @@ extern "C" void ui_draw() {
     ImGui::Text("fps: %3f  time: %3f", settings.avgFps, settings.timer);
     ImGui::Spacing();
     ImGui::Text("Gen: %d ", settings.gen);
-    ImGui::Text("cars: %d reached %d", settings.cars,settings.reached);
-    ImGui::Text("fitness %f", settings.fitness);
+    ImGui::Text("cars: %d", settings.cars);
 
     
   
     
    
-    ImGui::PlotLines("fitness", fitgraph.data(), fitgraph.size(), 0, nullptr, FLT_MAX, FLT_MAX, ImVec2(0, 80));
 
     ImGui::Spacing();
-    ImGui::DragFloat(" training speed %f ", &settings.trainspeed, 0.1f, 1.0f, 100.0f);
+    ImGui::DragFloat(" training speed  ", &settings.trainspeed, 0.01f, 1.0f, 10.0f);
+    ImGui::DragFloat(" generation time  ", &settings.gentime, 0.1f, 1.0f, 1000.0f);
 
-    ImGui::InputInt("cars %d  ", &settings.samplecar);
     if (ImGui::Button("restart")) {
         restart();
-        settings.cars = settings.samplecar;
+       
         settings.gen = 1;
-        settings.fitness = 0.0f;
+       
         settings.timer = 0.0f;
     }
     ImGui::Text("target");
     bool setmax = false;
-    if (ImGui::DragFloat("pos x %f", &settings.targetx, 1.f, 0.0f, 5000.0f)) {
+    if (ImGui::DragFloat("pos x ", &settings.targetx, 1.f, 0.0f, 5000.0f)) {
         setmax = true;
     }
-    if (ImGui::DragFloat("pos y %f", &settings.targety, 1.f, 0.0f, 5000.0f)) {
+    if (ImGui::DragFloat("pos y ", &settings.targety, 1.f, 0.0f, 5000.0f)) {
         setmax = true;
     }
-    if (ImGui::DragFloat("size %f", &settings.targetsize, 0.1f, 0.0f, 5000.0f)) {
+    if (ImGui::DragFloat("size ", &settings.targetsize, 0.1f, 0.0f, 5000.0f)) {
         setmax = true;
     }
     if (setmax) {
@@ -57,6 +55,8 @@ extern "C" void ui_draw() {
         setmax = false;
     }
     ImGui::Spacing();
+
+  
     
     ImGui::Spacing();
     ImGui::Checkbox("add obstacle", &settings.addingobstacle);

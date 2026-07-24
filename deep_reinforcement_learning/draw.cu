@@ -6,6 +6,7 @@
 #include <iostream>
 #include "data.h"
 #include <cuda.h>
+#include <cmath>
 #include <cuda_device_runtime_api.h>
 #include <device_launch_parameters.h>
 #include <cuda_gl_interop.h>
@@ -33,16 +34,29 @@ void registervbo() {
         printf("vbo registered\n");
     }
 }
+__global__ void initTrackingKernel(
+    int n,
+    const float4* __restrict__ data1,
+    float4* prevData,
+    float* pathLength,
+    float* headingChange
+) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) return;
 
+    prevData[i] = data1[i];
+    pathLength[i] = 0.0f;
+    headingChange[i] = 0.0f;
+}
 
-__global__ void registercars(int n, float4* data1,ray* rays,float4* data2,int* alive,float* fitness, float sx, float sy,float dx) {
+__global__ void registercars(int n, float4* data1,ray* rays,float4* data2,int* alive, float sx, float sy,float dx) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (i >= n)return;
 
     float4& d = data1[i];
     float4& d2 = data2[i];
-    float& f = fitness[i];
+
     d.x = sx;
     d.y = sy;
     d.z = 0.0f;
@@ -53,7 +67,6 @@ __global__ void registercars(int n, float4* data1,ray* rays,float4* data2,int* a
     d2.z = 0.0f;
     d2.w = 0.0f;
 
-    f = 0.0f;
 
     alive[i] = 1;
 
@@ -68,17 +81,21 @@ __global__ void registercars(int n, float4* data1,ray* rays,float4* data2,int* a
 void initcars() {
     int n = settings.cars;
     cudaMemcpyToSymbol(d_ray_angles, ray_angles, sizeof(ray_angles));
-    registercars << <blocks(n), threads >> > (n, data1,rays,data2,alive,fitness, settings.spawnx, settings.spawny,settings.ray_max_len);
+    registercars << <blocks(n), threads >> > (n, data1,rays,data2,alive, settings.spawnx, settings.spawny,settings.ray_max_len);
     
-    printf("cars registered \n");
+    printf("car registered \n");
+  
 
 }
 
 void restartgeneration() {
     int n = settings.cars;
-    registercars << <blocks(n), threads >> > (n, data1, rays, data2, alive, fitness, settings.spawnx, settings.spawny, settings.ray_max_len);
-}
 
+
+    registercars << <blocks(n), threads >> > (n, data1, rays, data2, alive,  settings.spawnx, settings.spawny, settings.ray_max_len);
+    
+
+}
 
 
 
@@ -106,9 +123,7 @@ __global__ void fillcardata(int n,quadvertex2d* carvert,float4* data1,int* alive
     if (rot < 0.0f) {
         rot += 360.0f;
     }
-  /*  if (rot > 360.0f) {
-        rot = 0.0f;
-    }*/
+ 
     c.rotation = rot;
   
 }
@@ -126,7 +141,6 @@ void loadcardata() {
         printf("car pointer mapping failed %s \n", cudaGetErrorString(er));
     }
     fillcardata << <blocks(settings.cars), threads >> > (settings.cars,devPtr, data1,alive, settings.carwidth, settings.carheight);
-    cudaDeviceSynchronize();
 
   cudaError_t err=  cudaGraphicsUnmapResources(1, &carInstRes, 0);
     if (err != cudaSuccess) {
@@ -180,9 +194,9 @@ extern "C" void registerrayvbo() {
 
 
 
-__global__ void fillraydata(int n, linepoint2d* rayvert,circlevertex2d* dot,const  ray* __restrict__ rays, const float4* __restrict__ data1,int caridx) {
+__global__ void fillraydata(int n, linepoint2d* rayvert,circlevertex2d* dot,const  ray* __restrict__ rays, const float4* __restrict__ data1) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    int c = caridx;
+    int c = 0;
     if (i >= n)return;
     rayvert[i].ox = data1[c].x;
     rayvert[i].oy = data1[c].y;
@@ -203,7 +217,15 @@ __global__ void fillraydata(int n, linepoint2d* rayvert,circlevertex2d* dot,cons
     dot[i].r = 1.0f;
     dot[i].g = 1.0f;
     dot[i].b = 1.0f;
+
+   
 }
+
+
+
+
+   
+
 
 void loadraydata() {
 
@@ -228,9 +250,13 @@ void loadraydata() {
    cudaError_t ter= cudaGraphicsResourceGetMappedPointer((void**)&dotdevPtr, &dotbytes, raysdot);
     if (ter != cudaSuccess) {
         printf("raydot pointer mapping failed %s \n", cudaGetErrorString(ter));
+
+
     }
-    fillraydata << <blocks(settings.rays), threads >> > (6,devPtr,dotdevPtr,rays,data1,settings.bestcaridx);
-    cudaDeviceSynchronize();
+
+  
+
+    fillraydata << <blocks(settings.rays), threads >> > (6,devPtr,dotdevPtr,rays,data1);
 
    cudaError_t err= cudaGraphicsUnmapResources(1, &raysres, 0);
     if (err != cudaSuccess) {
@@ -287,7 +313,6 @@ __global__ void moverkernel(int n,float dt, float4* car,float4* data2,int* alive
 }
 
 
-
 extern "C" void stepcars() {
     runnet();
    // test << <blocks(settings.cars), threads >> > (settings.cars, data2, settings.dt, settings.dumx, settings.dumy);
@@ -295,7 +320,10 @@ extern "C" void stepcars() {
     cudaError_t err = cudaGetLastError();
     if (err) {
         printf("stepcars failed %s \n", cudaGetErrorString(err));
+
+        
     }
+   
 }
 
 extern "C" void draw() {

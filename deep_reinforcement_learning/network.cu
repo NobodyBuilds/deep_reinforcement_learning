@@ -15,13 +15,14 @@
 
 struct ddata {
 	float maxspeed;
-	float maxdist;
+	float raymaxdist;
 	float maxdisttotarget;
 	float targetx;
 	float taregety;
 	float spawnx;
 	float spawny;
 	float degtorad;
+	int maxsteer;
 	int numcars;
 	int layers;
 	int inputcount;
@@ -30,15 +31,17 @@ __constant__ ddata d;
 ddata h;
 void setconst() {
 	h.degtorad = 3.1415927f / 180.0f;
-	h.inputcount = 11;
+	h.inputcount = 13;
 	h.layers = settings.layers;
-	h.maxdist = settings.maxdisttotarget;
+	h.maxdisttotarget = settings.maxdisttotarget;
 	h.maxspeed = dparam.max_speed;
 	h.numcars = settings.cars;
 	h.targetx = settings.targetx;
 	h.taregety = settings.targety;
 	h.spawnx = settings.spawnx;
 	h.spawny = settings.spawny;
+	h.raymaxdist = settings.ray_max_len;
+	h.maxsteer = dparam.max_steer;
 
 	cudaMemcpyToSymbol(d, &h, sizeof(ddata));
 	cudaError_t err = cudaGetLastError();
@@ -53,164 +56,29 @@ extern "C" void allocate(){
 	int n = settings.cars;
 	cudaMalloc(&data1, n * sizeof(float4));
 	cudaMalloc(&data2, n * sizeof(float4));
-	cudaMalloc(&fitness, n * sizeof(float));
 	cudaMalloc(&alive, n * sizeof(int));
 	cudaMalloc(&rays, n * sizeof(ray));
 	cudaMalloc(&segments, settings.max_obstacles * 4 * sizeof(float4));
-	cudaMalloc(&indices, n * sizeof(int));
-	
 
 	printf("data allocated \n");
 }
 
 
-__global__ void fitnesskernel(int n,const float4* __restrict__ data1,const float4* __restrict__ data2 ,const int* __restrict__ alive ,float* fitness,float maxdt,float tx,float ty ) {
 
-	int i = blockIdx.x * blockDim.x + threadIdx.x;
-
-	if (i >= n)return;
-
-	float4 c = __ldg(&data1[i]);
-	float4 d2 = __ldg(&data2[i]);
-	int a = alive[i];
-	float dx = tx - c.x;
-	float dy = ty - c.y;
-	float cudist = sqrtf(dx * dx + dy * dy);
-
-	float sx = d.spawnx - c.x;
-	float sy = d.spawny - c.y;
-
-	float sdist = sqrtf(sx * sx + sy * sy);
-
-	float val = 0.0f;
-	if (a == 2) {
-		val = 1000.0f;
-	}
-	else if (a == 0) {
-		val = -100.0f;
-	}else{
-		val = 5.0f;
-	}
-
-	fitness[i] = ((maxdt - cudist) * 10.0f) 
-		+ sdist
-		+ val 
-		+ (c.w * 2.0f)
-		- d2.z * 10.0f; //time taken
-
-
-
-}
-
-__global__ void sortkernel(int n, int j, int k, float* fitness, int* indices) {
-	int i = blockIdx.x * blockDim.x + threadIdx.x;
-	if (i >= n)return;
-
-	unsigned int ixj = i ^ j;
-
-	if (ixj > i) {
-		bool accending = ((i & k) == 0);
-		if ((fitness[i] < fitness[ixj]) == accending) {
-			float tempf = fitness[i];
-			fitness[i] = fitness[ixj];
-			fitness[ixj] = tempf;
-			int tempi = indices[i];
-			indices[i] = indices[ixj];
-			indices[ixj] = tempi;
-		}
-	}
-}
-void bitonicsort() {
-	int n = settings.cars;
-
-	for (int k = 2; k <= n; k <<= 1) {
-		for (int j = k >> 1; j > 0; j >>= 1) {
-			sortkernel << < blocks(settings.cars), threads >> > (settings.cars, j, k, fitness, indices);
-		}
-	}
-}
-__device__ float fit;
-
-__global__ void te(int s, float* fitness) {
-	int i = blockIdx.x * blockDim.x + threadIdx.x;
-	if (i >= s)return;
-
-	float f = fitness[i];
-	
-	atomicAdd(&fit, f);
-	
-}
-__global__ void fillindices(int n, int* indices) {
-	int i = blockIdx.x * blockDim.x + threadIdx.x;
-	if (i >= n)
-		return;
-	indices[i] = i;
-
-}
-
-void computefitness() {
-
-	fitnesskernel << <blocks(settings.cars), threads >> > (settings.cars, data1, data2, alive, fitness, settings.maxdisttotarget, settings.targetx, settings.targety);
-	
-	
-
-	fillindices << <blocks(settings.cars), threads >> > (settings.cars, indices);
-	
-	bitonicsort();
-	int zero = 0.0f;
-	cudaMemcpyToSymbol(fit, &zero, sizeof(float));
-	te << <blocks(settings.cars),threads >> > (settings.cars, fitness);
-	float hfit = 0.0f;
-	cudaMemcpyFromSymbol(&hfit, fit, sizeof(float));
-	
-	float afit = hfit / settings.cars;
-	settings.fitness = afit;
-	fitgraph.push_back(afit);
-	
-	mutation();
-
-}
 void setmaxdisttotarget() {
 	float dx = settings.spawnx - settings.targetx;
 	float dy = settings.spawny - settings.targety;
 	
 
 	settings.maxdisttotarget = sqrtf(dx * dx + dy * dy);
+
+	setconst();
 }
 
 
 
-__device__ unsigned long long gidx;
-__global__ void caridxkernel(int n, const float4* __restrict__ data1, const int* __restrict__ alive,float tx,float ty){
-	
-	int i = blockIdx.x * blockDim.x + threadIdx.x;
-	if (i >= n)
-		return;
-	if (alive[i] == 1) {
-		float4 c = __ldg(&data1[i]);
 
-		float dx = tx - c.x;
-		float dy = ty - c.y;
-		float dist = sqrtf(dx * dx + dy * dy);
 
-		unsigned int distBits = __float_as_uint(dist);
-		unsigned long long key = (((unsigned long long)distBits) << 32) | (unsigned int)i;
-
-		atomicMin(&gidx, key);
-	}
-}
-void getbestcaridx() {
-	unsigned long long initVal = ULLONG_MAX;
-	cudaMemcpyToSymbol(gidx, &initVal, sizeof(unsigned long long));
-
-	caridxkernel << <blocks(settings.cars), threads >> > (
-		settings.cars, data1,alive, settings.targetx, settings.targety
-		);
-	unsigned long long result;
-	cudaMemcpyFromSymbol(&result, gidx, sizeof(unsigned long long));
-	settings.bestcaridx = (int)(result & 0xFFFFFFFFu);
-
-}
 
 
 //weights and netrwork
@@ -253,10 +121,8 @@ void setoffsets() {
 }
 void initlayers() {
 	//easy configraton of layers
-	addlayer(10, 16);
+	addlayer(13, 16);
 	addlayer(16, 32);
-	addlayer(32, 64);
-	addlayer(64, 32);
 	addlayer(32, 16);
 	addlayer(16, 2);
 
@@ -267,8 +133,8 @@ void initlayers() {
 
 
 
-__host__ __device__ __forceinline__ int idx(int offset, int k, int caridx) {
-	return (offset + k) * d.numcars + caridx;
+__host__ __device__ __forceinline__ int idx(int offset, int k) {
+	return offset + k ;
 }
 
 
@@ -298,122 +164,124 @@ __device__ float leakyrelu(float x) {
 
 }
 
-__device__ __forceinline__ void firstlayer(int n ,int ci,int w,int d ,int inputs,float* input,const float* __restrict__ weights,const float* __restrict__ bias,float* nodevals){
+__global__ void firstlayer(int n ,const float4* __restrict__ data1,const float4* __restrict__ data2,const ray* __restrict__ rays, const float* __restrict__ weights,const float* __restrict__ bias,float* nodevals){
 
-	for (int i = 0; i < n; i++) {
+	float4 c = __ldg(&data1[0]);
+	float4 c2 = __ldg(&data2[0]);
+	float dx = d.targetx - c.x;
+	float dy = d.taregety - c.y;
+	float dist = sqrtf(dx * dx + dy * dy);
 
-		float x = bias[idx(0,i,ci)];
-		for (int k = 0; k < inputs; k++) {
-			x += input[k] * weights[idx(w + i * inputs , k, ci)];
+	float targetForward = (dx * cosf(c.z) + dy * sinf(c.z)) / d.maxdisttotarget;
+	float targetSide = (-dx * sinf(c.z) + dy * cosf(c.z)) / d.maxdisttotarget;
 
-		}
-
-		nodevals[idx(d, i, ci)] = leakyrelu(x);
-	}
-
-}
+	float angle = c.z;
 
 
-__device__ void solvelayers(int n,int ci, int nin, int w, int d, int b, int p, bool isout, const float* __restrict__ dWeights, const float* __restrict__ dBias,float* dNodeData) {
-
-	
-	for (int i = 0; i < n; i++) {
-
-
-		float val = dBias[idx(b,i,ci)];
-
-		for (int j = 0; j < nin; j++) {
-			float v = dNodeData[idx(p,j,ci)];
-			val += v * dWeights[idx(w + i * nin,j,ci)];
-		}
-		
-		dNodeData[idx(d , i, ci)] = isout ? tanh(val) : leakyrelu(val);
-	}
-
-}
-
-__device__ void getoutput(int i, int d, float* nodevals, float4* data2) {
-	for (int j = 0; j < 2; j++) {
-
-		if (j == 0) {
-			data2[i].x = nodevals[idx(d, j, i)];
-		}
-		else {
-			data2[i].y = nodevals[idx(d, j, i)];
-		}
-
-	}
-}
-
-__global__ void netkernel(int n ,const float4* __restrict__ data1,float4* data2,const int* __restrict__ alive,
-	const ray* rays,const float* __restrict__ weights,
-	const float* __restrict__ bias,float* nodevals ,const Layer* layer
-
-) {
+	float input[13] = { sinf(angle), cosf(angle),
+									targetForward,targetSide,
+									c2.w / d.maxsteer,
+									c.w / d.maxspeed,
+									rays[0].len[0] / d.raymaxdist,
+									rays[0].len[1] / d.raymaxdist,
+									rays[0].len[2] / d.raymaxdist,
+									rays[0].len[3] / d.raymaxdist,
+									rays[0].len[4] / d.raymaxdist,
+									rays[0].len[5] / d.raymaxdist,
+									fminf(dist / d.maxdisttotarget,1.0f)
+	};
+	int insize = 13;
 
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= n)return;
 
-	float4 c = __ldg(&data1[i]);
-	float4 c2 = __ldg(&data2[i]);
+		float x = bias[idx(0,i)];
+		for (int k = 0; k < insize; k++) {
+			x += input[k] * weights[idx(0 + i * insize , k)];
 
-	if (alive[i] == 1) {
+		}
 
-		for (int l = 0; l < d.layers; l++) {
-
-			if (l == 0) {
-				float dx = d.targetx - c.x;
-				float dy = d.taregety - c.y;
-				float dist = sqrtf(dx * dx + dy * dy);
-
-				float angle = c.z ;
-				float input[10] = { sinf(angle), cosf(angle),
-									c.w / d.maxspeed,
-									rays[i].len[0],
-									rays[i].len[1],
-									rays[i].len[2],
-									rays[i].len[3],
-									rays[i].len[4],
-									rays[i].len[5],
-									fminf(dist / d.maxdisttotarget,1.0f)
-				};
-				int didx = layer[0].dIdx;
-				firstlayer(layer[0].Nout, i, 0,didx, 10, input, weights, bias, nodevals);
-			}
-			else {
-				
-
-				int nin = layer[l - 1].Nout;
-				int wl = layer[l].wIdx;
-				int di = layer[l].dIdx;
-				int b = layer[l].bIdx;
-				int p = layer[l - 1].dIdx;
-
-				bool isout = (l == d.layers - 1);
-
-				solvelayers(layer[l].Nout, i, nin, wl, di, b, p, isout, weights, bias, nodevals);
-
-			}
+		nodevals[idx(0, i)] = leakyrelu(x);
+}
 
 
+
+
+__global__ void solvelayers(int n, int nin, int w, int d, int b, int p, bool isout, const float* __restrict__ dWeights, const float* __restrict__ dBias,float* dNodeData) {
+
+	
+	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	if (i >= n)return;
+
+
+		float val = dBias[idx(b,i)];
+
+		for (int j = 0; j < nin; j++) {
+			float v = dNodeData[idx(p,j)];
+			val += v * dWeights[idx(w + i * nin,j)];
+		}
+		
+		dNodeData[idx(d , i )] = isout ? tanh(val) : leakyrelu(val);
+	
+
+}
+
+__global__ void getoutput( int d, float* nodevals, float4* data2) {
+	for (int j = 0; j < 2; j++) {
+
+		if (j == 0) {
+			data2[0].x = nodevals[idx(d, j)];
+		}
+		else {
+			data2[0].y = nodevals[idx(d, j)];
+		}
+
+	}
+}
+
+void net(){
+
+	for (int l = 0; l < settings.layers; l++) {
+
+		if (l == 0) {
+			int nout = layerdata[l].Nout;
+
+			firstlayer << < blocks(nout), threads >> > (nout, data1, data2, rays, d_weights, d_bias, d_nodvals);
+
+		}
+		else
+		{
+
+
+			int nin = layerdata[l - 1].Nout;
+			int wl = layerdata[l].wIdx;
+			int di = layerdata[l].dIdx;
+			int b = layerdata[l].bIdx;
+			int p = layerdata[l - 1].dIdx;
+
+			bool isout = (l == settings.layers - 1);
+
+			solvelayers << < blocks(layerdata[l].Nout), threads >> > (layerdata[l].Nout, nin, wl, di, b, p, isout, d_weights, d_bias, d_nodvals);
 
 
 
 		}
-		float outd = layer[d.layers - 1].dIdx;
-		getoutput(i, outd, nodevals, data2);
+
+
 	}
 
+		int outd = layerdata[settings.layers - 1].dIdx;
+		getoutput<<<1,1>>>( outd, d_nodvals, data2);
 
+
+
+	
 }
 
 
+
 void runnet() {
-	netkernel << < blocks(settings.cars),threads >> > (settings.cars,data1,data2,alive,rays,d_weights,d_bias,d_nodvals,dlayer);
-	cudaError_t err = cudaGetLastError();
-	if (err) {
-		printf("network layers failed %s \n", cudaGetErrorString(err));
-	}
+	net();
 }
 
 
@@ -421,7 +289,6 @@ void allocatenetmem() {
 	cudaMalloc(&d_weights, weightbuffersize * sizeof(float));
 	cudaMalloc(&d_bias, biassize * sizeof(float));
 	cudaMalloc(&d_nodvals, nodedatasize * sizeof(float));
-	cudaMalloc(&dlayer, settings.layers *sizeof(Layer));
 
 	cudaError_t err = cudaGetLastError();
 	if (err) {
@@ -434,7 +301,6 @@ void allocatenetmem() {
 void copywbtogpu() {
 	cudaMemcpy(d_weights, weights.data(), weightbuffersize * sizeof(float), cudaMemcpyHostToDevice);
 	cudaMemcpy(d_bias, bias.data(), biassize * sizeof(float), cudaMemcpyHostToDevice);
-	cudaMemcpy(dlayer, layerdata.data(), settings.layers * sizeof(Layer),cudaMemcpyHostToDevice);
 
 	cudaError_t err = cudaGetLastError();
 	if (err) {
@@ -449,97 +315,17 @@ void copywbtogpu() {
 
 
 
-
-
-
-
-void mutation() {
-	int top10 = settings.cars / 10;
-	cudaError_t err;
-	
-	if (top10 == 0|| settings.cars <10) {
-		return;
-	}
-
-	cudaMemcpy(tempweights.data(), d_weights, weightbuffersize * sizeof(float), cudaMemcpyDeviceToHost);
-	cudaMemcpy(tempbias.data(), d_bias, biassize * sizeof(float), cudaMemcpyDeviceToHost);
-	cudaMemcpy(tempindices.data(), indices, settings.cars * sizeof(int), cudaMemcpyDeviceToHost);
-	err = cudaGetLastError();
-	if (err) {
-		printf("weight cpy to host failed :%s\n", cudaGetErrorString(err));
-		return;
-	}
-	int w = weightbuffersize / settings.cars;
-	int b = biassize / settings.cars;
-	int n = settings.cars;
-	//copy best performers extactly
-	for (int i = 0; i < top10; i++) {
-		int I = tempindices[i];
-
-		for (int j = 0; j < w; j++) {
-			weights[j * n + i] = tempweights[j * n + I];
-		}
-		for (int j = 0; j < b; j++) {
-			bias[j*n+i] = tempbias[j*n+I ];
-		}
-
-	}
-	std::mt19937 rng(std::random_device{}());
-	std::uniform_real_distribution<float> W(-0.2f, 0.2f);
-	std::uniform_real_distribution<float> B(-0.2f, 0.2f);
-	
-	std::uniform_int_distribution<int> dice(0, top10-1);
-
-	
-	//mutate rest population 
-	for (int i = top10; i < settings.cars; i++) {
-		for (int j = 0; j < w; j++) {
-			int x = dice(rng);
-			int p = tempindices[x];
-			float variation= W(rng);
-			weights[j*n + i] = tempweights[j * n + p] ;
-			weights[j * n + i] += variation;
-		}
-		for (int j = 0; j < b; j++) {
-			int x = dice(rng);
-			int p = tempindices[x];
-			float variation =B(rng);
-			bias[j*n+i ] = tempbias[j * n + p];
-			bias[j*n+i ] += variation;
-
-		}
-	}
-
-
-
-	cudaMemcpy(d_weights, weights.data(), weightbuffersize * sizeof(float),cudaMemcpyHostToDevice);
-	cudaMemcpy(d_bias, bias.data(), biassize * sizeof(float),cudaMemcpyHostToDevice);
-
-	err = cudaGetLastError();
-	if (err) {
-		printf(" mutated weight memcpy failed :%s \n", cudaGetErrorString(err));
-		return;
-	}
-
-
-	
-
-
-}
-
 void restart() {
 	clearvectors();
 	unregister();
 	unregisterobs();
 	cudafree();
-	fitgraph.clear();
 	printf("memfree on restart \n");
 	weightbuffersize = 0;
 	biassize = 0;
 	nodedatasize = 0;
 	settings.layers = 0;
 	settings.obstacles = 0;
-	settings.cars = settings.samplecar;
 	registervbo();
 	printf("car vbo registered \n");
 	registerObstaclesVbo();
@@ -569,12 +355,8 @@ void initnetwork() {
 	allocate();
 	setmaxdisttotarget();
 
-	fillindices << <blocks(settings.cars), threads >> > (settings.cars, indices);
 	setconst();
 
-	tempweights.resize(weightbuffersize);
-	tempbias.resize(biassize);
-	tempindices.resize(settings.cars);
 
 }
 
@@ -585,9 +367,6 @@ void cudafree() {
 	cudaFree(data1);
 	cudaFree(data2);
 	cudaFree(alive);
-	cudaFree(fitness);
-	cudaFree(dlayer);
-	cudaFree(indices);
 	cudaFree(rays);
 	cudaFree(Rays);
 	cudaFree(obstacle);

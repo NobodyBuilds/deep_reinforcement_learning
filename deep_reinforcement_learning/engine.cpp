@@ -44,7 +44,7 @@ int main() {
 		double now = glfwGetTime();
 		double frameTime = now - lastTime;
 		lastTime = now;
-		settings.accumulator += (float)frameTime;
+		
 		//settings.timer += frameTime;
 		
 		noRender.processinputs();
@@ -53,7 +53,7 @@ int main() {
 		
 
 		settings.accumulator += frameTime * settings.trainspeed;
-		getbestcaridx();
+		
 		while (settings.accumulator >= settings.dt)
 		{
 			stepcars();
@@ -66,11 +66,11 @@ int main() {
 
 		draw();
 
-		if (settings.timer >= 30.0f || noalive ) {
+		if (settings.timer >= settings.gentime || !settings.alive ) {
 			settings.timer = 0.0f;
 			settings.gen++;
-			noalive = false;
-			computefitness();
+			settings.alive = true;
+			
 			restartgeneration();
 		}
 
