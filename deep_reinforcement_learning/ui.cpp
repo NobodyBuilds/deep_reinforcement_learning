@@ -21,10 +21,11 @@ extern "C" void ui_draw() {
     ImGui::Text("fps: %3f  time: %3f", settings.avgFps, settings.timer);
     ImGui::Spacing();
     ImGui::Text("Gen: %d ", settings.gen);
-    ImGui::Text("cars: %d", settings.cars);
+    ImGui::Text("cars: %d", settings.cars); 
 
+   
     
-  
+    ImGui::PlotLines("fitness", rewardgraph.data(), (int)rewardgraph.size(), 0, nullptr, FLT_MAX, FLT_MAX, ImVec2(0, 120));
     
    
 

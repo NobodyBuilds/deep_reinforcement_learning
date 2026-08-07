@@ -10,5 +10,5 @@ extern "C" {
 	void draw();
 	void restartgeneration();
 	void unregister();
-	
+	void sync();
 }

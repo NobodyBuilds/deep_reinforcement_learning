@@ -41,14 +41,17 @@ struct param {
 	float obheight = 50.0f;
 	float trainspeed = 1.0f;
 	float gentime = 60.0f;
-
 	
-
+	float lr = 0.01;
+	int step = 0;
+	int replaybuffersize = 1000;
+	int c = 1000;
 	int gen = 1;
 	int fpsCount = 0;
 	int cars =1 ;
 	int rays = 6;
-	int layers = 0;
+	int actor_layers = 0;
+	int critic_layers = 0;
 	int obstacles = 0;
 	int max_obstacles = 128;
 	bool addingobstacle = false;
@@ -95,14 +98,40 @@ inline linepoint2d* Rays = nullptr;
 inline quadvertex2d* obstacle = nullptr;
 
 inline float4* data1=nullptr;//posx,posy,heading,speed
-inline float4* data2 = nullptr;//throttle,steer,survival time,current steer
+inline float4* data2 = nullptr;//0,0,survival time,current steer
 inline ray* rays = nullptr;//rays len[6]
 inline int* alive = nullptr;//alive checker
 inline float4* segments = nullptr;
+inline float4* carcontrol = nullptr;//forward,backword,left,right
 
-inline float* d_weights = nullptr;
-inline float* d_bias = nullptr;
-inline float* d_nodvals = nullptr;
+inline float* d_actor_weights = nullptr;
+inline float* d_critic_weights = nullptr;
+inline float* d_actor_bias = nullptr;
+inline float* d_critic_bias = nullptr;
+inline float* d_actor_nodvals = nullptr;
+inline float* d_critic_nodvals = nullptr;
+inline float* d_actor_preact = nullptr;
+inline float* d_critic_preact = nullptr;
+inline float* d_actor_delta = nullptr;
+inline float* d_critic_delta = nullptr;
+
+
+
+struct replaybuffer {
+	float s1[13];
+	
+	float reward;
+	float logprob;
+	float value;
+	float rtg;
+	float advantage;
+	int action;
+	
+	bool done;
+};
+
+
+inline replaybuffer* d_state = nullptr;
 
 
 inline int threads = 256;
@@ -110,8 +139,14 @@ inline int blocks(int n) {
 	return (n + threads - 1) / threads;
 };
 
-inline std::vector<Layer> layerdata;
-inline std::vector<float>weights;
-inline std::vector<float>bias;
+inline std::vector<Layer> actor_layerdata;
+inline std::vector<Layer> critic_layerdata;
+inline std::vector<float>actor_weights;
+inline std::vector<float>critic_weights;
+inline std::vector<float>actor_bias;
+inline std::vector<float>critic_bias;
+
+
 inline std::vector<quadvertex2d> h_obdata;
+inline std::vector<float>rewardgraph;
 

@@ -57,9 +57,12 @@ int main() {
 		while (settings.accumulator >= settings.dt)
 		{
 			stepcars();
+			settings.step++;
+			settings.stepstotal++;
+
 			settings.timer += settings.dt;
-			checkcolison();
-			checkstate();
+			//checkcolison();
+			//checkstate();
 
 			settings.accumulator -= settings.dt;
 		}
@@ -87,6 +90,8 @@ int main() {
 			settings.fpsTimer = 0.f;
 			settings.fpsCount = 0;
 		}
+
+
 
 	}
 	unregister();

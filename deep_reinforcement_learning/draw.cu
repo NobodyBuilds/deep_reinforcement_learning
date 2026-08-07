@@ -18,6 +18,37 @@
 #include "net.h"
 
 
+struct drawd {
+    float maxdisttotarget;
+    float maxsteer;
+    float maxspeed;
+    float wheelbase;
+    float tx;
+    float ty;
+    float raymaxdist;
+    float accelrate;
+    float brakerate;
+    float steerrate;
+    float drag;
+
+};
+__constant__ drawd cd;
+drawd cdh;
+void sync() {
+    drawd& h = cdh;
+    h.accelrate = dparam.accel_rate;
+    h.brakerate = dparam.brake_rate;
+    h.maxdisttotarget = settings.maxdisttotarget;
+    h.maxspeed = dparam.max_speed;
+    h.maxsteer = dparam.max_steer;
+    h.raymaxdist = dparam.max_raylen;
+    h.tx = settings.targetx;
+    h.ty = settings.targety;
+    h.wheelbase = dparam.wheelbase;
+    h.steerrate = dparam.steer_rate;
+    h.drag = dparam.drag;
+    cudaMemcpyToSymbol(cd, &cdh, sizeof(drawd));
+}
 
 static cudaGraphicsResource *carInstRes;
 void registervbo() {
@@ -279,29 +310,33 @@ extern "C" void drawrays() {
 }
 
 
-__global__ void moverkernel(int n,float dt, float4* car,float4* data2,int* alive, float max_steer,float steer_rate,float accelrate,float brakerate,float drag,float maxspeed,float wheelbase) {
+__global__ void moverkernel(int n,float dt, float4* car,float4* data2,float4* carcontrol,int* alive,ray* rays) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n)return;
 
     if (alive[i] == 1) {
         float4 d2 = __ldg(&data2[i]);
         float4 d1 = __ldg(&car[i]);
+        float4 cc = __ldg(&carcontrol[i]);
 
-        float target_steer = (d2.y * (CUDART_PI_F / 180.0f)) * max_steer;
-        float maxDelta_steer = steer_rate * (CUDART_PI_F / 180.0f) * dt;
+        float sterrdir = cc.w - cc.z;
+        float target_steer = sterrdir *(CUDART_PI_F/180.0f)* cd.maxsteer;
+        float maxDelta_steer = cd.steerrate * (CUDART_PI_F / 180.0f) * dt;
 
         float delta = fminf(fmaxf(target_steer - d2.w, -maxDelta_steer), maxDelta_steer);
         data2[i].w += delta;
 
         float speed = d1.w;
-        float rate = d2.x > 0.0f ? accelrate : brakerate;
+        float move = cc.x - cc.y;
+        float rate = (move>0.0f)? cd.accelrate:cd.brakerate ;
 
-        speed += d2.x * rate * dt;
-        speed -= copysignf((drag * speed * speed * dt), speed);
 
-        speed = fminf(fmaxf(speed, -maxspeed * 0.5f), maxspeed);
+        speed +=move * rate * dt;
+        speed -= copysignf((cd.drag * speed * speed * dt), speed);
 
-        float aval = (speed / wheelbase) * tanf(data2[i].w);//use data2[i].w if any issue
+        speed = fminf(fmaxf(speed, -cd.maxspeed * 0.5f), cd.maxspeed);
+
+        float aval = (speed / cd.wheelbase) * tanf(data2[i].w);//use data2[i].w if any issue
         float heading = d1.z + aval * dt;
 
         car[i].x += speed * cosf(heading) * dt;
@@ -310,19 +345,25 @@ __global__ void moverkernel(int n,float dt, float4* car,float4* data2,int* alive
         car[i].z = heading;
         car[i].w = speed;
     }
+   
+    
+
 }
 
 
 extern "C" void stepcars() {
-    runnet();
-   // test << <blocks(settings.cars), threads >> > (settings.cars, data2, settings.dt, settings.dumx, settings.dumy);
-    moverkernel << <blocks(settings.cars), threads >> > (settings.cars,settings.dt, data1, data2,alive,dparam.max_steer,dparam.steer_rate,dparam.accel_rate,dparam.brake_rate,dparam.drag,dparam.max_speed,dparam.wheelbase);
+    
+    moverkernel << <blocks(settings.cars), threads >> > (settings.cars,settings.dt, data1,data2, carcontrol,alive,rays,settings.step,d_state);
     cudaError_t err = cudaGetLastError();
     if (err) {
         printf("stepcars failed %s \n", cudaGetErrorString(err));
 
         
     }
+    checkcolison();
+    checkstate();
+   
+  
    
 }
 

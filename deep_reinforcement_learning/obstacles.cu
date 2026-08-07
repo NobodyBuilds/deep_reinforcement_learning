@@ -86,7 +86,7 @@ std::vector<float> obw  = { 1800.0f, 10.0f, 1800.0f, 10.0f, 130.0f, 50.0f, 50.0f
 std::vector<float> obh  = { 10.0f, 900.0f, 10.0f, 900.0f, 150.0f, 480.0f, 320.0f, 630.0f, 50.0f, 50.0f, 162.0f, 148.0f, 154.0f, 50.0f, 185.0f, 303.0f, 196.0f };
 std::vector<float> obr  = { 0.0f, 0.0f, 0.0f, 0.0f, 45.0f, 0.0f, 43.0f, 0.0f, 37.0f, 0.0f, 0.0f, 32.5f, 0.0f, 0.0f, 36.2f, 0.0f, 82.6f };
 void preaddobstacle() {
-    for (int i = 0; i < obx.size(); i++) {
+    for (int i = 0; i <4; i++) {
 
 
         quadvertex2d c;
@@ -304,7 +304,7 @@ extern "C" void setrayexitdist() {
 }
 
 __device__ bool Alive;
-__global__ void checkstatekernel(int* alive,float4* data1,float4* data2, ray* rays ,float time,float tx,float ty,float size) {
+__global__ void checkstatekernel(int* alive,float4* data1,float4* data2, ray* rays ,float time,float tx,float ty,float size,replaybuffer* buffer ,int s) {
     
     bool win = false;
     if (alive[0] == 1) {
@@ -322,7 +322,7 @@ __global__ void checkstatekernel(int* alive,float4* data1,float4* data2, ray* ra
                 newState = 2;
                 dead = true;
                 win = true;
-             
+                buffer[s].done = true;
                 break;
 
             }
@@ -381,8 +381,12 @@ void unregisterobs() {
 
 
 void clearvectors() {
-    weights.clear();
-    bias.clear();
-    layerdata.clear();
+    actor_weights.clear();
+    critic_weights.clear();
+    actor_bias.clear();
+    critic_bias.clear();
+    actor_layerdata.clear();
+    critic_layerdata.clear();
     h_obdata.clear();
+    rewardgraph.clear();
 }

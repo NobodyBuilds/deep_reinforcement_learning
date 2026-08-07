@@ -7,6 +7,8 @@ extern "C" {
 	
 	void copywbtogpu();
 	void runnet();
+	void fnet();
 	void cudafree();
 	void restart();
+	void reward(int s);
 }
