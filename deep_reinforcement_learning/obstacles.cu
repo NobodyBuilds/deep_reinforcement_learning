@@ -12,7 +12,7 @@
 #include <device_launch_parameters.h>
 #include <cmath>
 #include <math.h>
-__constant__ float d2_ray_angles[6];
+__constant__ float d2_ray_angles[16];
 //render obstacles
 cudaGraphicsResource* obstaclesRes;
 extern "C" void registerObstaclesVbo() {
@@ -265,7 +265,7 @@ __global__ void rayhit(int n,ray* rays, const float4* __restrict__ data1, const 
 
     float4 car = __ldg(&data1[i]);
 
-    for (int r = 0; r < 6; r++) {
+    for (int r = 0; r < 16; r++) {
         float angle = car.z + d2_ray_angles[r];
         float4 d = {car.x,car.y, cosf(angle),sinf(angle) };
         float dist = castray(obcount, d, maxdist, segment);
@@ -278,16 +278,16 @@ extern "C" void checkcolison() {
 }
 
 
-__constant__ float d_rayexitdist[6];
+__constant__ float d_rayexitdist[16];
 
-float rayexitdist[6];
+float rayexitdist[16];
 
 extern "C" void setrayexitdist() {
 
     float hh = settings.carheight * 0.5f;
     float hw = settings.carwidth * 0.5f;
 
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < 16; i++) {
         float c = fabsf(cosf(ray_angles[i]));
         float s = fabsf(sinf(ray_angles[i]));
         float tx = (c > 1e-6f) ? hw / c : INFINITY;
@@ -303,34 +303,37 @@ extern "C" void setrayexitdist() {
         }
 }
 
-__device__ bool Alive;
-__global__ void checkstatekernel(int* alive,float4* data1,float4* data2, ray* rays ,float time,float tx,float ty,float size,replaybuffer* buffer ,int s) {
-    
+__device__ int Alive;
+__global__ void checkstatekernel(int n,int* alive,float4* data1,float4* data2, ray* rays ,float time,float tx,float ty,float size,replaybuffer* buffer ,int s ,int bn,float maxd) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n)return;
     bool win = false;
-    if (alive[0] == 1) {
+    int bidx = s * n + i;
+    if (alive[i] == 1) {
 
-        float4 c = __ldg(&data1[0]);
+        float4 c = __ldg(&data1[i]);
         float dx = tx - c.x;
         float dy = ty - c.y;
         float dist = sqrtf(dx * dx + dy * dy);
         bool dead = false;
-        int newState = alive[0];
-        for (int k = 0; k < 6; k++) {
+        int newState = alive[i];
+        for (int k = 0; k < 16; k++) {
            // float len = rays[i].len[k];
 
             if (dist - d_rayexitdist[k] <= size * 0.5f) {
                 newState = 2;
                 dead = true;
                 win = true;
-                buffer[s].done = true;
+               
                 break;
 
             }
         }
             if (!win) {
-                for (int k = 0; k < 6; k++) {
-                    if (rays[0].len[k] <= d_rayexitdist[k]) {
+                for (int k = 0; k < 16; k++) {
+                    if (rays[i].len[k] <= d_rayexitdist[k]) {
                         newState = 0; dead = true;
+						
                         break;
                     }
                 }
@@ -339,18 +342,30 @@ __global__ void checkstatekernel(int* alive,float4* data1,float4* data2, ray* ra
 
         
 
-        if (dead) {
-            alive[0] = newState;
-            Alive = false;
-           
-        }
-        else {
-            Alive = true;
-        }
-        data2[0].z = time;
+            if (dead) {
+                alive[i] = newState;
+                buffer[bidx].done = true;
+                data2[i].x = maxd;
 
-       
-        
+            }
+            else {
+
+                buffer[bidx].done = false;
+            }
+            data2[i].z = time;
+
+            int lastTick = bn / n - 1;
+            if (s == lastTick) {
+                buffer[bidx].done = true;
+            }
+
+    }
+    else {
+        buffer[bidx].done = true;
+    }
+
+    if (alive[i] != 1) {
+        atomicAdd(&Alive, 1);
     }
 
     
@@ -361,15 +376,21 @@ extern "C" void checkstate() {
    
   
  
-    checkstatekernel << <1, 1 >> > ( alive, data1, data2, rays, settings.timer, settings.targetx, settings.targety, settings.targetsize);
-    cudaError_t er = cudaGetLastError();
-    if (er) {
-        printf("checkstate kernel error %s\n", cudaGetErrorString(er));
-    }
-    bool a = true;
-    cudaMemcpyFromSymbol(&a, Alive, sizeof(bool));
-    settings.alive = a;
-   
+    checkstatekernel << <blocks(settings.cars),threads >> > (settings.cars,alive, data1, data2, rays, settings.timer, settings.targetx, settings.targety, settings.targetsize, d_state, settings.step, settings.replaybuffersize, settings.maxdisttotarget);
+    
+    int a = 0;
+  cudaError_t err=  cudaMemcpyFromSymbol(&a, Alive, sizeof(int));
+  if (a == settings.cars) {
+      settings.alive = false;
+  }
+   if (err !=cudaSuccess) {
+       printf("checkstate alive memcpy error %s\n", cudaGetErrorString(err));
+   }
+  int zero = 0;
+  err=cudaMemcpyToSymbol(Alive, &zero, sizeof(int));
+  if (err != cudaSuccess) {
+      printf("checkstate alive reset error %s\n", cudaGetErrorString(err));
+  }
 }
 
 void unregisterobs() {

@@ -36,6 +36,7 @@ int main() {
 	initcars();
 	initobstacles();
 	setrayexitdist();
+	shuffleindices();
 
 	double lastTime = glfwGetTime();
 	double fpsClock = lastTime;
@@ -56,13 +57,12 @@ int main() {
 		
 		while (settings.accumulator >= settings.dt)
 		{
-			stepcars();
-			settings.step++;
-			settings.stepstotal++;
+
+			run_network();
+			
 
 			settings.timer += settings.dt;
-			//checkcolison();
-			//checkstate();
+			
 
 			settings.accumulator -= settings.dt;
 		}

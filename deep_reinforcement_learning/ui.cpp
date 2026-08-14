@@ -20,17 +20,17 @@ extern "C" void ui_draw() {
     ImGui::Begin("settings");
     ImGui::Text("fps: %3f  time: %3f", settings.avgFps, settings.timer);
     ImGui::Spacing();
-    ImGui::Text("Gen: %d ", settings.gen);
-    ImGui::Text("cars: %d", settings.cars); 
-
+    ImGui::Text("Gen: %d  rollout gen %d  buffer %d / %d", settings.gen,settings.rolloutstep,settings.step,settings.replaybuffersize);
+    ImGui::Text("mse: %5f prev %5f ", settings.mloss, settings.oldmloss );
+   
    
     
-    ImGui::PlotLines("fitness", rewardgraph.data(), (int)rewardgraph.size(), 0, nullptr, FLT_MAX, FLT_MAX, ImVec2(0, 120));
+    ImGui::PlotLines("reward", rewardgraph.data(), (int)rewardgraph.size(), 0, nullptr, FLT_MAX, FLT_MAX, ImVec2(0, 120));
     
    
 
     ImGui::Spacing();
-    ImGui::DragFloat(" training speed  ", &settings.trainspeed, 0.01f, 1.0f, 10.0f);
+    ImGui::DragFloat(" training speed  ", &settings.trainspeed, 0.01f, 1.0f, 20.0f);
     ImGui::DragFloat(" generation time  ", &settings.gentime, 0.1f, 1.0f, 1000.0f);
 
     if (ImGui::Button("restart")) {

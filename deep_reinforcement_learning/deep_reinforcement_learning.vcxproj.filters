@@ -38,6 +38,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="compile.bat" />
+    <None Include="..\carLearns.exe" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="draw">

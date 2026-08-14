@@ -25,7 +25,7 @@ struct param {
 	float targetx = 1600.0f, targety = 450.0f;
 	float targetsize = 40.0f;
 	float dumx = 0.0, dumy = 0.0f;
-	float ray_max_len = 75.0f;
+	float ray_max_len = 250.0f;
 	float maxdisttotarget = 0.0f;
 	float maxdisttospawn = 0.0f;
 	float fps = 0.0f;
@@ -41,15 +41,20 @@ struct param {
 	float obheight = 50.0f;
 	float trainspeed = 1.0f;
 	float gentime = 60.0f;
+	float mloss = 0.0f;
+	float oldmloss = 0.0f;
 	
-	float lr = 0.01;
+	float lr = 1e-3f;
+	int bestcar = 0;
+	int inputs = 24;
 	int step = 0;
-	int replaybuffersize = 1000;
+	int rolloutstep = 0;
+	int replaybuffersize = 2048;
 	int c = 1000;
 	int gen = 1;
 	int fpsCount = 0;
-	int cars =1 ;
-	int rays = 6;
+	int cars =5 ;
+	int rays = 16;
 	int actor_layers = 0;
 	int critic_layers = 0;
 	int obstacles = 0;
@@ -79,17 +84,27 @@ struct dparams {
 
 inline dparams dparam;
 //ray predefined angles from center
-inline float ray_angles[6] = {
-	0.7853982f,
-	0.0f,
-	-0.7853982f,
-	3.1415927f,
-	2.3561945f,
-	-2.3561945f
+inline float ray_angles[16] = {
+	 0.0f,
+	0.3926991f,   // 22.5°
+	0.7853982f,   // 45°
+	1.1780972f,   // 67.5°
+	1.5707963f,   // 90°
+	1.9634954f,   // 112.5°
+	2.3561945f,   // 135°
+	2.7488936f,   // 157.5°
+	3.1415927f,   // 180°
+   -2.7488936f,   // -157.5°
+   -2.3561945f,   // -135°
+   -1.9634954f,   // -112.5°
+   -1.5707963f,   // -90°
+   -1.1780972f,   // -67.5°
+   -0.7853982f,   // -45°
+   -0.3926991f    // -22.5°
 };
 //ray struct
 struct ray {
-	float len[6];
+	float len[16];
 };
 
 
@@ -110,22 +125,26 @@ inline float* d_actor_bias = nullptr;
 inline float* d_critic_bias = nullptr;
 inline float* d_actor_nodvals = nullptr;
 inline float* d_critic_nodvals = nullptr;
+inline float* d_cars_nodevals = nullptr;
 inline float* d_actor_preact = nullptr;
 inline float* d_critic_preact = nullptr;
 inline float* d_actor_delta = nullptr;
 inline float* d_critic_delta = nullptr;
-
-
+inline int* d_indices = nullptr;
+inline Layer* d_actlayer = nullptr;
+inline Layer* d_critlayer = nullptr;
 
 struct replaybuffer {
-	float s1[13];
+	float s1[24];
 	
 	float reward;
 	float logprob;
+	float old_logprob;
 	float value;
 	float rtg;
 	float advantage;
 	int action;
+	int caridx;
 	
 	bool done;
 };
@@ -145,7 +164,7 @@ inline std::vector<float>actor_weights;
 inline std::vector<float>critic_weights;
 inline std::vector<float>actor_bias;
 inline std::vector<float>critic_bias;
-
+inline std::vector<int> shuffled_indices;
 
 inline std::vector<quadvertex2d> h_obdata;
 inline std::vector<float>rewardgraph;

@@ -6,9 +6,9 @@ extern "C" {
 	void setmaxdisttotarget();
 	
 	void copywbtogpu();
-	void runnet();
-	void fnet();
+	void shuffleindices();
 	void cudafree();
 	void restart();
 	void reward(int s);
+	void run_network();
 }
