@@ -44,7 +44,7 @@ struct param {
 	float mloss = 0.0f;
 	float oldmloss = 0.0f;
 	
-	float lr = 0.01f;
+	float lr = 0.0001f;
 	int bestcar = 0;
 	int inputs = 24;
 	int step = 0;

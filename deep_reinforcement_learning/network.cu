@@ -382,7 +382,7 @@ __global__ void tuneweights(int n, int nin, int l, int l1d, int lw, int lsize, i
 __device__ void getoutput(int D, float* nodevals, float4* carcontrol, replaybuffer* buffer, int s,int ci, curandState* d_rngstate) {
 	int action = 0;
 	int bidx = s * d.numcars + ci;
-	float m = nodevals[D];
+	float m = nodevals[caridx(D, 0, ci)];
 	for (int j = 1; j < 6; j++) m = fmaxf(m, nodevals[caridx(D,j,ci)]);
 
 	float sum = 0.f;
@@ -445,13 +445,12 @@ __global__ void getlog(int n, int d, int* indices, replaybuffer* buffer, int s, 
 
 }
 __device__ float d_reward = 0.0f;
-__device__ bool first = true;
 __device__ float oldr = 0.0f;
 __device__ int id = 0;
 __global__ void reward_kernel(int n,int s, replaybuffer* buffer, float4* data1,float4* data2,float4* control, int* alive,ray* rays) {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= n)return;
-	if (alive[i] == 1) {
+	
 		float4 c = __ldg(&data1[i]);
 		int bidx = s * d.numcars + i;
 		float alivereward = alive[i] == 1 ? 0.0f : -10.0f;
@@ -463,8 +462,8 @@ __global__ void reward_kernel(int n,int s, replaybuffer* buffer, float4* data1,f
 		float curdist = sqrtf(dx * dx + dy * dy);
 		float insight = (curdist < d.raymaxdist) ? 1.0f : 0.0f;
 		float forward = (control[i].x > 0.0f) ? 1.0f : 0.0f;
-		float prevdist = (first) ? d.maxdisttotarget : data2[i].x;
-		first = false;
+		float prevdist = data2[i].x;
+		
 		float diff = prevdist - curdist;
 		float progressreward = (diff > 0.0f) ? 1.0f:-0.5f;
 
@@ -478,11 +477,13 @@ __global__ void reward_kernel(int n,int s, replaybuffer* buffer, float4* data1,f
 
 		buffer[bidx].reward = reward;
 		if (reward > oldr) {
-			id = i;
-			oldr = reward;
+			if (alive[i] == 1) {
+				id = i;
+				oldr = reward;
+			}
 		}
 		atomicAdd(&d_reward, reward);
-	}
+	
 }
 __device__ void getQvalue(int s,int c, int D, float* nodevals, replaybuffer* buffer) {
 	int bidx = s * d.numcars + c;
@@ -490,7 +491,7 @@ __device__ void getQvalue(int s,int c, int D, float* nodevals, replaybuffer* buf
 	if (!isfinite(buffer[bidx].value)) {
 		printf("BAD PPO %d value=%f \n",
 					s,
-					buffer[s].value
+					buffer[bidx].value
 				);
 	}
 }
@@ -644,9 +645,7 @@ __global__ void netkernel(int n, const float4* __restrict__ data1, float4* data2
 				int p = layer[l - 1].dIdx;
 
 				bool isout = (l == d.layers - 1);
-				if (!isactor && isout) {
-					nin = 1;
-				}
+				
 
 				solvelayers(layer[l].Nout, i, nin, wl, di, b, p, isout, weights, bias, nodevals);
 
@@ -961,8 +960,7 @@ void restart() {
 	unregister();
 	unregisterobs();
 	cudafree();
-	bool a = true;
-	cudaMemcpyToSymbol(first, &a, sizeof(bool));
+	
 	printf("memfree on restart \n");
 	actor_weightbuffersize = 0;
 	critic_weightbuffersize = 0;
