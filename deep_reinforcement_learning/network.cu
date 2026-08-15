@@ -451,35 +451,38 @@ __device__ int id = 0;
 __global__ void reward_kernel(int n,int s, replaybuffer* buffer, float4* data1,float4* data2,float4* control, int* alive,ray* rays) {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= n)return;
-	float4 c = __ldg(&data1[i]);
-	int bidx = s * d.numcars + i;
-	float alivereward = alive[i] == 1 ? 0.0f : -100.0f;
-	if (alive[i] == 2) {
-		alivereward = 50.0f;
+	if (alive[i] == 1) {
+		float4 c = __ldg(&data1[i]);
+		int bidx = s * d.numcars + i;
+		float alivereward = alive[i] == 1 ? 0.0f : -10.0f;
+		if (alive[i] == 2) {
+			alivereward = 50.0f;
+		}
+		float dx = c.x - d.targetx;
+		float dy = c.y - d.taregety;
+		float curdist = sqrtf(dx * dx + dy * dy);
+		float insight = (curdist < d.raymaxdist) ? 1.0f : 0.0f;
+		float forward = (control[i].x > 0.0f) ? 1.0f : 0.0f;
+		float prevdist = (first) ? d.maxdisttotarget : data2[i].x;
+		first = false;
+		float diff = prevdist - curdist;
+		float progressreward = (diff > 0.0f) ? 1.0f:-0.5f;
+
+		data2[i].x = curdist;
+
+		float dcovered = (d.maxdisttotarget - curdist) / d.maxdisttotarget;
+		float frontDanger = 1.0f - rays[i].len[0] / d.raymaxdist;
+
+
+		float reward = dcovered+ progressreward + alivereward + insight + (-frontDanger);
+
+		buffer[bidx].reward = reward;
+		if (reward > oldr) {
+			id = i;
+			oldr = reward;
+		}
+		atomicAdd(&d_reward, reward);
 	}
-	float dx = c.x - d.targetx;
-	float dy = c.y - d.taregety;
-	float curdist = sqrtf(dx * dx + dy * dy);
-	float insight = (curdist < d.raymaxdist) ? 1.0f : 0.0f;
-	float forward = (control[i].x > 0.0f) ? 1.0f: 0.0f;
-	float prevdist = (first) ? d.maxdisttotarget : data2[i].x;
-	first = false;
-	float diff = prevdist - curdist;
-	float progressreward = 10.0f * diff / d.maxdisttotarget;
-
-	data2[i].x = curdist;
-
-	float dcovered = (d.maxdisttotarget - curdist) / d.maxdisttotarget;
-	float frontDanger = 1.0f - rays[i].len[0] / d.raymaxdist;
-	float reward = dcovered +   progressreward+alivereward + insight +(-frontDanger) ;
-
-	buffer[bidx].reward = reward;
-	if (reward > oldr) {
-		id = i;
-		oldr = reward;
-	}
-	atomicAdd(&d_reward , reward);
-
 }
 __device__ void getQvalue(int s,int c, int D, float* nodevals, replaybuffer* buffer) {
 	int bidx = s * d.numcars + c;
@@ -838,6 +841,7 @@ void net(int s, bool isactor) {
 	}
 
 }
+
 void run_network() {
 
 	net(settings.step, true);//actor forward pass
@@ -846,16 +850,23 @@ void run_network() {
 	reward(settings.step);
 	float h_reward = 0.0f;
 	float zero = 0.0f;
-	
-	
-	
-			
-	
+	steps++;
+	if(settings.nextgen){
+
+		cudaError_t err = cudaMemcpyFromSymbol(&h_reward, d_reward, sizeof(float));
+		cudaMemcpyToSymbol(d_reward, &zero, sizeof(float));
+		rewardgraph.push_back((h_reward / settings.replaybuffersize)/steps);
+		if (err != cudaSuccess) {
+			printf("!ERROR! reward memcpy to host failed %s \n", cudaGetErrorString(err));
+		}
+		settings.nextgen = false;
+		steps = 0;
+	}
 
 
 
-	settings.step+= settings.cars;
-	if ( settings.step >= settings.replaybuffersize) {
+	settings.step++;
+	if (  settings.step >= settings.replaybuffersize / settings.cars) {
 		settings.rolloutstep++;
 		computevals();
 		shuffleindices();
@@ -874,22 +885,11 @@ void run_network() {
 			printf("rollout error %s\n ", cudaGetErrorString(err));
 		}
 
-		 err = cudaMemcpyFromSymbol(&h_reward, d_reward, sizeof(float));
-		cudaMemcpyToSymbol(d_reward, &zero, sizeof(float));
-		rewardgraph.push_back(h_reward / settings.cars);
-		if (err != cudaSuccess) {
-			printf("!ERROR! reward memcpy to host failed %s \n", cudaGetErrorString(err));
-		}
-		err = cudaMemcpyFromSymbol(&h_reward, d_reward, sizeof(float));
-		cudaMemcpyToSymbol(d_reward, &zero, sizeof(float));
-		rewardgraph.push_back(h_reward / settings.replaybuffersize);
-		if (err != cudaSuccess) {
-			printf("!ERROR! reward memcpy to host failed %s \n", cudaGetErrorString(err));
-		}
-	}
-	if (settings.step >= settings.replaybuffersize) {
+		
 		settings.step = 0;
+		
 	}
+	
 }
 
 std::mt19937 shuffleRng(1234);
@@ -1003,7 +1003,7 @@ void initnetwork() {
 	settings.replaybuffersize -= settings.replaybuffersize % settings.cars;
 	initlayers();
 
-	initWB(-0.02f, 0.02f);
+	initWB(-0.05f, 0.05f);
 	allocatenetmem();
 	copywbtogpu();
 	allocate();
@@ -1038,5 +1038,7 @@ void cudafree() {
 	cudaFree(d_cars_nodevals);
 	cudaFree(d_actlayer);
 	cudaFree(d_critlayer);
+
+	
 
 }

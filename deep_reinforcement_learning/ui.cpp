@@ -20,7 +20,7 @@ extern "C" void ui_draw() {
     ImGui::Begin("settings");
     ImGui::Text("fps: %3f  time: %3f", settings.avgFps, settings.timer);
     ImGui::Spacing();
-    ImGui::Text("Gen: %d  rollout gen %d  buffer %d / %d", settings.gen,settings.rolloutstep,settings.step,settings.replaybuffersize);
+    ImGui::Text("Gen: %d  rollout gen %d  buffer %d / %d", settings.gen,settings.rolloutstep,settings.step * settings.cars,settings.replaybuffersize);
     ImGui::Text("mse: %5f prev %5f ", settings.mloss, settings.oldmloss );
    
    

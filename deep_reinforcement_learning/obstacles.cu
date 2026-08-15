@@ -412,4 +412,6 @@ void clearvectors() {
     critic_layerdata.clear();
     h_obdata.clear();
     rewardgraph.clear();
+    shuffled_indices.clear();
+    h_obdata.clear();
 }

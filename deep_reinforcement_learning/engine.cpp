@@ -73,7 +73,7 @@ int main() {
 			settings.timer = 0.0f;
 			settings.gen++;
 			settings.alive = true;
-			
+			settings.nextgen = true;
 			restartgeneration();
 		}
 

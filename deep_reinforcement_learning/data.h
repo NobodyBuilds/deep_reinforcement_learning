@@ -44,12 +44,12 @@ struct param {
 	float mloss = 0.0f;
 	float oldmloss = 0.0f;
 	
-	float lr = 1e-3f;
+	float lr = 0.01f;
 	int bestcar = 0;
 	int inputs = 24;
 	int step = 0;
 	int rolloutstep = 0;
-	int replaybuffersize = 2048;
+	int replaybuffersize = 4096;
 	int c = 1000;
 	int gen = 1;
 	int fpsCount = 0;
@@ -62,9 +62,12 @@ struct param {
 	int max_obstacles = 256;
 	bool addingobstacle = false;
 	bool alive = true;
+	bool nextgen = false;
 
 	
 };
+
+inline int steps = 0;
 
 inline param settings;
 
