@@ -161,23 +161,24 @@ __global__ void fillcardata(int n,quadvertex2d* carvert,float4* data1,int* alive
 }
 
 void loadcardata() {
-		
+    static bool first = true;
    cudaError_t e=  cudaGraphicsMapResources(1, &carInstRes, 0);
-   if (e != cudaSuccess) {
+   if (e != cudaSuccess && first) {
        printf("car mapping failed %s \n", cudaGetErrorString(e));
    }
     quadvertex2d* devPtr=nullptr;
     size_t bytes=0;
    cudaError_t er= cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &bytes, carInstRes);
-    if (er != cudaSuccess) {
+    if (er != cudaSuccess&&first) {
         printf("car pointer mapping failed %s \n", cudaGetErrorString(er));
     }
     fillcardata << <blocks(settings.cars), threads >> > (settings.cars,devPtr, data1,alive, settings.carwidth, settings.carheight);
 
   cudaError_t err=  cudaGraphicsUnmapResources(1, &carInstRes, 0);
-    if (err != cudaSuccess) {
+    if (err != cudaSuccess&&first) {
         printf("car unmapping failed %s \n", cudaGetErrorString(err));
     }
+    first = false;
 }
 
 extern "C" void drawcars() {
@@ -261,13 +262,13 @@ __global__ void fillraydata(int n, linepoint2d* rayvert,circlevertex2d* dot,cons
 
 
 void loadraydata() {
-
+    static bool first = true;
     cudaError_t e= cudaGraphicsMapResources(1, &raysres, 0);
-    if (e != cudaSuccess) {
+    if (e != cudaSuccess&&first) {
         printf("ray mapping failed %s \n", cudaGetErrorString(e));
     }
     cudaError_t te= cudaGraphicsMapResources(1, &raysdot, 0);
-    if (te != cudaSuccess) {
+    if (te != cudaSuccess && first) {
         printf("raydot mapping failed %s \n", cudaGetErrorString(te));
     }
 
@@ -277,11 +278,11 @@ void loadraydata() {
     size_t dotbytes = 0;
 
    cudaError_t er= cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &bytes, raysres);
-    if (er != cudaSuccess) {
+    if (er != cudaSuccess && first) {
         printf("ray pointer mapping failed %s \n", cudaGetErrorString(er));
     }
    cudaError_t ter= cudaGraphicsResourceGetMappedPointer((void**)&dotdevPtr, &dotbytes, raysdot);
-    if (ter != cudaSuccess) {
+    if (ter != cudaSuccess && first) {
         printf("raydot pointer mapping failed %s \n", cudaGetErrorString(ter));
 
 
@@ -292,13 +293,15 @@ void loadraydata() {
     fillraydata << <blocks(settings.rays), threads >> > (16,devPtr,dotdevPtr,rays,data1,settings.bestcar);
 
    cudaError_t err= cudaGraphicsUnmapResources(1, &raysres, 0);
-    if (err != cudaSuccess) {
+    if (err != cudaSuccess && first) {
         printf("ray unmapping failed %s \n", cudaGetErrorString(err));
     }
    cudaError_t terr= cudaGraphicsUnmapResources(1, &raysdot, 0);
-    if (terr != cudaSuccess) {
+    if (terr != cudaSuccess && first) {
         printf("raydot unmapping failed %s \n", cudaGetErrorString(terr));
     }
+
+    first = false;
 }
 
 extern "C" void drawrays() {
@@ -365,7 +368,7 @@ extern "C" void stepcars() {
     if (err != cudaSuccess) {
         printf("check colision  recieved corrupted data ->%s \n", cudaGetErrorString(err));
     }
-  //  checkstate();
+    checkstate();
    
   
    

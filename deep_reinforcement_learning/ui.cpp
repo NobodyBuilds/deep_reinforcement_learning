@@ -30,10 +30,12 @@ extern "C" void ui_draw() {
    
 
     ImGui::Spacing();
+    ImGui::DragInt("cars", &settings.samplecar, 1, 1, 9999);
     ImGui::DragFloat(" training speed  ", &settings.trainspeed, 0.01f, 1.0f, 20.0f);
     ImGui::DragFloat(" generation time  ", &settings.gentime, 0.1f, 1.0f, 1000.0f);
 
     if (ImGui::Button("restart")) {
+        settings.cars = settings.samplecar;
         restart();
        
         settings.gen = 1;

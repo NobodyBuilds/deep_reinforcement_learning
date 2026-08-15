@@ -90,7 +90,7 @@ int critic_biassize = 0;
 int actor_nodedatasize = 0;
 int critic_nodedatasize = 0;
 int hbatchsize = 64;
-
+int carsnodesize = 0;
 
 void addlayer(int in, int out, bool isactor) {
 	Layer l;
@@ -104,6 +104,7 @@ void addlayer(int in, int out, bool isactor) {
 		settings.actor_layers++;
 		actor_weightbuffersize += (in * out) ;
 		actor_nodedatasize += out ;
+		carsnodesize += out * settings.cars;
 		actor_biassize += out ;
 	}
 	else {
@@ -194,9 +195,9 @@ __device__ __forceinline__ void firstlayer(int n, int ci, int w, int D, int inpu
 
 	for (int i = 0; i < n; i++) {
 
-		float x = bias[caridx(0, i, ci)];
+		float x = bias[idx(0, i)];
 		for (int k = 0; k < inputs; k++) {
-			x += input[k] * weights[caridx(w + i * inputs, k, ci)];
+			x += input[k] * weights[idx(w + i * inputs, k)];
 
 		}
 
@@ -210,11 +211,11 @@ __device__ void solvelayers(int n, int ci, int nin, int w, int d, int b, int p, 
 	for (int i = 0; i < n; i++) {
 
 
-		float val = dBias[caridx(b, i, ci)];
+		float val = dBias[idx(b, i)];
 
 		for (int j = 0; j < nin; j++) {
 			float v = dNodeData[caridx(p, j, ci)];
-			val += v * dWeights[caridx(w + i * nin, j, ci)];
+			val += v * dWeights[idx(w + i * nin, j)];
 		}
 
 		dNodeData[caridx(d, i, ci)] = isout ? val : leakyrelu(val);
@@ -451,6 +452,7 @@ __global__ void reward_kernel(int n,int s, replaybuffer* buffer, float4* data1,f
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= n)return;
 	float4 c = __ldg(&data1[i]);
+	int bidx = s * d.numcars + i;
 	float alivereward = alive[i] == 1 ? 0.0f : -100.0f;
 	if (alive[i] == 2) {
 		alivereward = 50.0f;
@@ -471,7 +473,7 @@ __global__ void reward_kernel(int n,int s, replaybuffer* buffer, float4* data1,f
 	float frontDanger = 1.0f - rays[i].len[0] / d.raymaxdist;
 	float reward = dcovered +   progressreward+alivereward + insight +(-frontDanger) ;
 
-	buffer[s+i].reward = reward;
+	buffer[bidx].reward = reward;
 	if (reward > oldr) {
 		id = i;
 		oldr = reward;
@@ -599,22 +601,22 @@ __global__ void netkernel(int n, const float4* __restrict__ data1, float4* data2
 												c2.w / d.maxsteer,
 												c.w / d.maxspeed,
 												targetinsight,
-												rays[0].len[0] / d.raymaxdist,
-												rays[0].len[1] / d.raymaxdist,
-												rays[0].len[2] / d.raymaxdist,
-												rays[0].len[3] / d.raymaxdist,
-												rays[0].len[4] / d.raymaxdist,
-												rays[0].len[5] / d.raymaxdist,
-												rays[0].len[6] / d.raymaxdist,
-												rays[0].len[7] / d.raymaxdist,
-												rays[0].len[8] / d.raymaxdist,
-												rays[0].len[9] / d.raymaxdist,
-												rays[0].len[10] / d.raymaxdist,
-												rays[0].len[11] / d.raymaxdist,
-												rays[0].len[12] / d.raymaxdist,
-												rays[0].len[13] / d.raymaxdist,
-												rays[0].len[14] / d.raymaxdist,
-												rays[0].len[15] / d.raymaxdist,
+												rays[i].len[0] / d.raymaxdist,
+												rays[i].len[1] / d.raymaxdist,
+												rays[i].len[2] / d.raymaxdist,
+												rays[i].len[3] / d.raymaxdist,
+												rays[i].len[4] / d.raymaxdist,
+												rays[i].len[5] / d.raymaxdist,
+												rays[i].len[6] / d.raymaxdist,
+												rays[i].len[7] / d.raymaxdist,
+												rays[i].len[8] / d.raymaxdist,
+												rays[i].len[9] / d.raymaxdist,
+												rays[i].len[10] / d.raymaxdist,
+												rays[i].len[11] / d.raymaxdist,
+												rays[i].len[12] / d.raymaxdist,
+												rays[i].len[13] / d.raymaxdist,
+												rays[i].len[14] / d.raymaxdist,
+												rays[i].len[15] / d.raymaxdist,
 												dist / d.maxdisttotarget
 				};
 				int insize = 24;
@@ -639,6 +641,9 @@ __global__ void netkernel(int n, const float4* __restrict__ data1, float4* data2
 				int p = layer[l - 1].dIdx;
 
 				bool isout = (l == d.layers - 1);
+				if (!isactor && isout) {
+					nin = 1;
+				}
 
 				solvelayers(layer[l].Nout, i, nin, wl, di, b, p, isout, weights, bias, nodevals);
 
@@ -839,12 +844,17 @@ void run_network() {
 	net(settings.step, false);//critic forward pass
 	stepcars();
 	reward(settings.step);
+	float h_reward = 0.0f;
+	float zero = 0.0f;
+	
+	
+	
+			
+	
 
 
 
-
-
-	settings.step++;
+	settings.step+= settings.cars;
 	if ( settings.step >= settings.replaybuffersize) {
 		settings.rolloutstep++;
 		computevals();
@@ -856,7 +866,7 @@ void run_network() {
 		float l = 0.0f;
 		cudaMemcpyFromSymbol(&l, MSE, sizeof(float));
 		settings.mloss = l/(float)settings.replaybuffersize;
-		float zero = 0.0f;
+		
 		cudaMemcpyToSymbol(MSE, &zero, sizeof(float));
 
 		cudaError_t err = cudaGetLastError();
@@ -864,10 +874,15 @@ void run_network() {
 			printf("rollout error %s\n ", cudaGetErrorString(err));
 		}
 
-		float h_reward = 0.0f;
 		 err = cudaMemcpyFromSymbol(&h_reward, d_reward, sizeof(float));
 		cudaMemcpyToSymbol(d_reward, &zero, sizeof(float));
-		rewardgraph.push_back(h_reward/settings.replaybuffersize);
+		rewardgraph.push_back(h_reward / settings.cars);
+		if (err != cudaSuccess) {
+			printf("!ERROR! reward memcpy to host failed %s \n", cudaGetErrorString(err));
+		}
+		err = cudaMemcpyFromSymbol(&h_reward, d_reward, sizeof(float));
+		cudaMemcpyToSymbol(d_reward, &zero, sizeof(float));
+		rewardgraph.push_back(h_reward / settings.replaybuffersize);
 		if (err != cudaSuccess) {
 			printf("!ERROR! reward memcpy to host failed %s \n", cudaGetErrorString(err));
 		}
@@ -905,7 +920,9 @@ void allocatenetmem() {
 	cudaMalloc(&d_state, settings.replaybuffersize * sizeof(replaybuffer));
 	cudaMalloc(&carcontrol,settings.cars* sizeof(float4));
 	cudaMalloc(&d_indices, settings.replaybuffersize * sizeof(int));
-	cudaMalloc(&d_cars_nodevals, settings.cars * actor_nodedatasize * sizeof(float));
+	cudaMalloc(&d_cars_nodevals, carsnodesize * sizeof(float));
+	cudaMalloc(&d_actlayer, settings.actor_layers * sizeof(Layer));
+	cudaMalloc(&d_critlayer, settings.critic_layers * sizeof(Layer));
 
 
 	cudaError_t err = cudaGetLastError();
@@ -921,6 +938,8 @@ void copywbtogpu() {
 	cudaMemcpy(d_critic_weights, critic_weights.data(), critic_weightbuffersize * sizeof(float), cudaMemcpyHostToDevice);
 	cudaMemcpy(d_actor_bias, actor_bias.data(), actor_biassize * sizeof(float), cudaMemcpyHostToDevice);
 	cudaMemcpy(d_critic_bias, critic_bias.data(), critic_biassize * sizeof(float), cudaMemcpyHostToDevice);
+	cudaMemcpy(d_actlayer, actor_layerdata.data(), settings.actor_layers * sizeof(Layer), cudaMemcpyHostToDevice);
+	cudaMemcpy(d_critlayer, critic_layerdata.data(), settings.critic_layers * sizeof(Layer), cudaMemcpyHostToDevice);
 
 	cudaError_t err = cudaGetLastError();
 	if (err) {
@@ -1016,5 +1035,8 @@ void cudafree() {
 	cudaFree(segments);
 	cudaFree(d_indices);
 	cudaFree(car);
+	cudaFree(d_cars_nodevals);
+	cudaFree(d_actlayer);
+	cudaFree(d_critlayer);
 
 }

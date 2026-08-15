@@ -52,24 +52,26 @@ __global__ void filldata(int n ,quadvertex2d* obsvert,quadvertex2d* obsdata) {
 }
 
 void fillobsdata() {
-
+    static bool first = true;
     cudaError_t e = cudaGraphicsMapResources(1, &obstaclesRes, 0);
-    if (e != cudaSuccess) {
+    if (e != cudaSuccess && first) {
         printf("obstacles mapping failed %s \n", cudaGetErrorString(e));
     }
     quadvertex2d* devPtr = nullptr;
     size_t bytes = 0;
     cudaError_t er = cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &bytes, obstaclesRes);
-    if (er != cudaSuccess) {
+    if (er != cudaSuccess && first) {
         printf("obstacles pointer mapping failed %s \n", cudaGetErrorString(er));
     }
     filldata << <blocks(settings.obstacles), threads >> > (settings.obstacles, devPtr, obstacle);
     cudaDeviceSynchronize();
 
     cudaError_t err = cudaGraphicsUnmapResources(1, &obstaclesRes, 0);
-    if (err != cudaSuccess) {
+    if (err != cudaSuccess && first) {
         printf("obstacles unmapping failed %s \n", cudaGetErrorString(err));
     }
+
+    first = false;
 }
 
 extern "C" void drawobstacles() {

@@ -53,12 +53,13 @@ struct param {
 	int c = 1000;
 	int gen = 1;
 	int fpsCount = 0;
-	int cars =5 ;
+	int cars =128 ;
+	int samplecar = cars;
 	int rays = 16;
 	int actor_layers = 0;
 	int critic_layers = 0;
 	int obstacles = 0;
-	int max_obstacles = 128;
+	int max_obstacles = 256;
 	bool addingobstacle = false;
 	bool alive = true;
 
