@@ -44,7 +44,7 @@ struct param {
 	float mloss = 0.0f;
 	float oldmloss = 0.0f;
 	
-	float lr = 0.0001f;
+	float lr = 1e-3f;
 	int bestcar = 0;
 	int inputs = 24;
 	int step = 0;
@@ -60,9 +60,11 @@ struct param {
 	int critic_layers = 0;
 	int obstacles = 0;
 	int max_obstacles = 256;
+	int random_obstacles_count = 20;
 	bool addingobstacle = false;
 	bool alive = true;
 	bool nextgen = false;
+	bool randomobstacles = false;
 
 	
 };
@@ -148,9 +150,12 @@ struct replaybuffer {
 	float rtg;
 	float advantage;
 	int action;
-	int caridx;
 	
 	bool done;
+};
+struct float2 {
+	float x;
+	float y;
 };
 
 

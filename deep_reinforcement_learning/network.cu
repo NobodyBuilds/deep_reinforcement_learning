@@ -450,31 +450,28 @@ __device__ int id = 0;
 __global__ void reward_kernel(int n,int s, replaybuffer* buffer, float4* data1,float4* data2,float4* control, int* alive,ray* rays) {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= n)return;
+		int bidx = s * d.numcars + i;
 	
 		float4 c = __ldg(&data1[i]);
-		int bidx = s * d.numcars + i;
-		float alivereward = alive[i] == 1 ? 0.0f : -10.0f;
+		float alivereward = alive[i] == 1 ? 0.1f : -2.0f;
 		if (alive[i] == 2) {
-			alivereward = 50.0f;
+			alivereward = 5.0f;
 		}
 		float dx = c.x - d.targetx;
 		float dy = c.y - d.taregety;
 		float curdist = sqrtf(dx * dx + dy * dy);
-		float insight = (curdist < d.raymaxdist) ? 1.0f : 0.0f;
-		float forward = (control[i].x > 0.0f) ? 1.0f : 0.0f;
-		float prevdist = data2[i].x;
-		
+		float insight = (curdist < d.raymaxdist) ? 0.5f : 0.0f;
+		float forward = (control[i].x > 0.0f) ? 0.1f : -0.05f;
+		float prevdist =  data2[i].x;
 		float diff = prevdist - curdist;
-		float progressreward = (diff > 0.0f) ? 1.0f:-0.5f;
+		float progressreward = (diff > 0.0f) ? 0.5f : -0.2f;
 
 		data2[i].x = curdist;
 
 		float dcovered = (d.maxdisttotarget - curdist) / d.maxdisttotarget;
 		float frontDanger = 1.0f - rays[i].len[0] / d.raymaxdist;
-
-
-		float reward = dcovered+ progressreward + alivereward + insight + (-frontDanger);
-
+		float reward = dcovered + progressreward + alivereward + insight+ forward -frontDanger ;
+	
 		buffer[bidx].reward = reward;
 		if (reward > oldr) {
 			if (alive[i] == 1) {
@@ -489,6 +486,7 @@ __device__ void getQvalue(int s,int c, int D, float* nodevals, replaybuffer* buf
 	int bidx = s * d.numcars + c;
 	buffer[bidx].value = nodevals[caridx(D,0,c)];
 	if (!isfinite(buffer[bidx].value)) {
+		buffer[bidx].value = 0.0f;
 		printf("BAD PPO %d value=%f \n",
 					s,
 					buffer[bidx].value
@@ -498,7 +496,7 @@ __device__ void getQvalue(int s,int c, int D, float* nodevals, replaybuffer* buf
 __global__ void computevalskernel(int cars,int ticks, replaybuffer* buffer) {
 	int c = blockIdx.x * blockDim.x + threadIdx.x;
 	if (c >= cars) return;
-	float y = 0.9f;
+	float y = 0.98f;
 	for (int t = 0; t < ticks; t++) {
 		int i = t * cars + c;
 		float val = buffer[i].reward;
@@ -512,7 +510,6 @@ __global__ void computevalskernel(int cars,int ticks, replaybuffer* buffer) {
 		atomicAdd(&MSE, buffer[i].advantage * buffer[i].advantage);
 	}
 }
-
 __device__ float d_adv_mean;
 __device__ float d_adv_var;
 __global__ void compute_adv_stats(int n, replaybuffer* buffer) {
@@ -566,9 +563,6 @@ __global__ void solvefrozenlayers(int n, int nin, int w, int D, int b, int p, bo
 
 
 }
-
-
-
 __global__ void netkernel(int n, const float4* __restrict__ data1, float4* data2, float4* carcontrol, const int* __restrict__ alive,
 	const ray* rays, const float* __restrict__ weights,
 	const float* __restrict__ bias, float* nodevals, const Layer* layer, bool isactor, replaybuffer* buffer, int s,curandState* rng

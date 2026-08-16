@@ -8,6 +8,7 @@
 #include "obstacles.h"
 #include<iostream>
 #include <vector>
+#include <random>
 #include <cuda_device_runtime_api.h>
 #include <device_launch_parameters.h>
 #include <cmath>
@@ -121,9 +122,8 @@ extern "C" void initobstacles() {
 //add obstacles
 
 extern "C" void copyobsdata() {
-    cudaMemcpy(obstacle, h_obdata.data(), settings.obstacles * sizeof(quadvertex2d), cudaMemcpyHostToDevice);
-    cudaError_t err = cudaGetLastError();
-    if (err) {
+    cudaError_t err = cudaMemcpy(obstacle, h_obdata.data(), settings.obstacles * sizeof(quadvertex2d), cudaMemcpyHostToDevice);
+    if (err!= cudaSuccess) {
         printf("obstacle memcpy error %s\n", cudaGetErrorString(err));
     }
 
@@ -414,4 +414,71 @@ void clearvectors() {
     rewardgraph.clear();
     shuffled_indices.clear();
     h_obdata.clear();
+}
+std::mt19937 rng(42);
+std::uniform_real_distribution<float> x(50.0f, 1750.0f);
+
+std::uniform_real_distribution<float> sx(100.0f, 800.0f);
+
+std::uniform_real_distribution<float> tx(800.0f, 1600.0f);
+
+std::uniform_real_distribution<float> y(50.0f, 850.0f);
+
+std::uniform_real_distribution<float> sy(100.0f, 800.0f);
+
+std::uniform_real_distribution<float> ty(100.0f, 800.0f);
+
+std::uniform_real_distribution<float> w(20.0f, 200.0f);
+
+std::uniform_real_distribution<float> h(20.0f, 200.0f);
+
+std::uniform_real_distribution<float> r(0.0f, 360.0f);
+bool isoverlaping(float tx,float ty) {
+
+}
+float2 getpos(bool isspawn) {
+
+    float x = (isspawn) ? sx(rng) : tx(rng);
+    float y = (isspawn) ? sy(rng) : ty(rng);
+
+}
+void randomobs() {
+    settings.obstacles = 0;
+    h_obdata.clear();
+   
+    for (int i = 0; i < settings.random_obstacles_count; i++) {
+        quadvertex2d o;
+        if (i < 4) {
+            o.x = obx[i];
+            o.y = oby[i];
+            o.height = obh[i];
+            o.width = obw[i];
+            o.rotation = obr[i];
+            o.r = 0.2f;
+            o.g = 0.2f;
+            o.b = 0.2f;
+        }
+        else {
+         
+            o.x = x(rng);
+            o.y = y(rng);
+            o.height = h(rng);
+            o.width = w(rng);
+            o.rotation = r(rng);
+            o.r = 0.2f;
+            o.g = 0.2f;
+            o.b = 0.2f;
+        }
+        h_obdata.push_back(o);
+        settings.obstacles++;
+    }
+
+
+    settings.spawnx = sx(rng);
+    settings.spawny = sy(rng);
+    settings.targetx = tx(rng);
+    settings.targety = ty(rng);
+
+    copyobsdata();
+    bake_segments();
 }

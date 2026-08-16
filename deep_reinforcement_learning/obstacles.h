@@ -15,4 +15,5 @@ extern "C" {
 	void setrayexitdist();
 	void unregisterobs();
 	void clearvectors();
+	void randomobs();
 }

@@ -74,6 +74,10 @@ int main() {
 			settings.gen++;
 			settings.alive = true;
 			settings.nextgen = true;
+			if (settings.randomobstacles) {
+				randomobs();
+				printf("called \n");
+			}
 			restartgeneration();
 		}
 

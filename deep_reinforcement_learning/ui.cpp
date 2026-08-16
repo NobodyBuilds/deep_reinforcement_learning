@@ -42,6 +42,8 @@ extern "C" void ui_draw() {
        
         settings.timer = 0.0f;
     }
+    ImGui::Checkbox("random obstacles", &settings.randomobstacles);
+    ImGui::Spacing();
     ImGui::Text("target");
     bool setmax = false;
     if (ImGui::DragFloat("pos x ", &settings.targetx, 1.f, 0.0f, 5000.0f)) {
