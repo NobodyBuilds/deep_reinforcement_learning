@@ -413,7 +413,8 @@ __device__ float get_lClip(replaybuffer* buffer, int s) {
 	}
 	return clipped_out;
 }
-__global__ void compute_delta(int n, int d, int l1_nout, int l1w, int l1_nin, int l1d, bool outlayer, bool isactor, float* nodedata, float* dDelta, float* dWeights, float* dpreact, replaybuffer* buffer, int s, int* indices, int nodedatasize) {
+__device__ float beta = 0.02f;
+__global__ void compute_delta(int n, int d, int l1_nout, int l1w, int l1_nin, int l1d, bool outlayer, bool isactor, float* nodedata, float* dDelta, float* dWeights, float* dpreact, replaybuffer* buffer, int s, int* indices, int nodedatasize,int gen) {
 
 
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -426,7 +427,17 @@ __global__ void compute_delta(int n, int d, int l1_nout, int l1w, int l1_nin, in
 			float coeff = get_lClip(buffer, bidx);
 			float pi_i = nodedata[b * nodedatasize + d + i];      
 			float y = (i == buffer[bidx].action) ? 1.0f : 0.0f;
-			dDelta[b * nodedatasize + d + i] = coeff * (y - pi_i);
+
+			float H = 0.0f;
+			for (int j = 0; j < n; j++) {
+				float pj = nodedata[b * nodedatasize + d + j];
+				H -= pj * logf(fmaxf(pj, 1e-8f));
+			}
+			
+			float entropybonus = beta * pi_i * (logf(fmaxf(pi_i, 1e-8f)) + H);
+
+			dDelta[b * nodedatasize + d + i] = coeff * (y - pi_i) + entropybonus;
+			beta= 0.02f * (1.0f / (1.0f + 0.0001f * gen));
 		}
 		else {
 			dDelta[b * nodedatasize + d + i] = nodedata[b * nodedatasize + d + i] - target;
@@ -538,24 +549,31 @@ __global__ void reward_kernel(int n,int s, replaybuffer* buffer, float4* data1,f
 		int bidx = s * d.numcars + i;
 	
 		float4 c = __ldg(&data1[i]);
-		float alivereward = alive[i] == 1 ? 0.1f : -2.0f;
+		float alivereward = alive[i] == 1 ? 0.0f : -2.0f;
 		if (alive[i] == 2) {
-			alivereward = 5.0f;
+			alivereward = 25.0f;
 		}
 		float dx = c.x - d.targetx;
 		float dy = c.y - d.taregety;
 		float curdist = sqrtf(dx * dx + dy * dy);
-		float insight = (curdist < d.raymaxdist) ? 0.5f : 0.0f;
+		
 		float forward = (control[i].x > 0.0f) ? 0.1f : -0.05f;
 		float prevdist =  data2[i].x;
 		float diff = prevdist - curdist;
-		float progressreward = (diff > 0.0f) ? 0.5f : -0.2f;
-
+		float progressreward = 3.0f * (diff / d.raymaxdist);
 		data2[i].x = curdist;
 
-		float dcovered = (d.maxdisttotarget - curdist) / d.maxdisttotarget;
-		float frontDanger = 1.0f - rays[i].len[0] / d.raymaxdist;
-		float reward = dcovered + progressreward + alivereward + insight+ forward -frontDanger ;
+		float coneMin = 1.0f;
+		int coneIdx[7] = { 13,14,15,0,1,2,3 };
+		for (int k = 0; k < 7; k++)
+			coneMin = fminf(coneMin, rays[i].len[coneIdx[k]] / d.raymaxdist);
+		float danger = 1.0f - coneMin;
+		float speedfrac = fabsf(c.w) / d.maxspeed;
+		float dangerPenalty = -2.0f * danger * danger * (0.5f + 0.5f * speedfrac); 
+
+		float timepenalty = -0.02f;
+	
+		float reward = progressreward + dangerPenalty + timepenalty + alivereward + forward;
 	
 		buffer[bidx].reward = reward;
 		if (reward > oldr) {
@@ -859,12 +877,12 @@ void backpropogation(int s, int curBatch, bool isactor) {
 		dim3 grid(blocks, curBatch);
 		if (isactor) {
 			compute_delta << <grid, threads >> > (n, d, l1out, l1w, l1nin, l1d, outlayer, isactor,
-				d_actor_nodvals, d_actor_delta, d_actor_weights, d_actor_preact, d_state, s, d_indices, actor_nodedatasize);
+				d_actor_nodvals, d_actor_delta, d_actor_weights, d_actor_preact, d_state, s, d_indices, actor_nodedatasize,settings.rolloutstep);
 		}
 		else {
 
 			compute_delta << <grid, threads >> > (n, d, l1out, l1w, l1nin, l1d, outlayer, isactor,
-				d_critic_nodvals, d_critic_delta, d_critic_weights, d_critic_preact, d_state, s, d_indices, critic_nodedatasize);
+				d_critic_nodvals, d_critic_delta, d_critic_weights, d_critic_preact, d_state, s, d_indices, critic_nodedatasize,settings.rolloutstep);
 		}
 
 
