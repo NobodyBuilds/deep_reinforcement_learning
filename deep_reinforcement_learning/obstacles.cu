@@ -219,9 +219,7 @@ extern "C" void bake_segments() {
     if (err) {
         printf("bake segment error %s\n", cudaGetErrorString(err));
     }
-    else {
-        printf("obstacle segments baked \n");
-    }
+    
 }
 
 //ray colison detection
@@ -418,9 +416,9 @@ void clearvectors() {
 std::mt19937 rng(42);
 std::uniform_real_distribution<float> x(50.0f, 1750.0f);
 
-std::uniform_real_distribution<float> sx(100.0f, 800.0f);
+std::uniform_real_distribution<float> sx(100.0f, 700.0f);
 
-std::uniform_real_distribution<float> tx(800.0f, 1600.0f);
+std::uniform_real_distribution<float> tx(900.0f, 1600.0f);
 
 std::uniform_real_distribution<float> y(50.0f, 850.0f);
 
@@ -433,14 +431,70 @@ std::uniform_real_distribution<float> w(20.0f, 200.0f);
 std::uniform_real_distribution<float> h(20.0f, 200.0f);
 
 std::uniform_real_distribution<float> r(0.0f, 360.0f);
-bool isoverlaping(float tx,float ty) {
+bool isoverlaping(float tx,float ty,int i) {
 
+    float rad = -h_obdata[i].rotation * 3.14f/ 180.0f;
+    float dx = tx - h_obdata[i].x;
+    float dy = ty - h_obdata[i].y;
+
+    float localX = dx * cos(rad) - dy * sin(rad);
+    float localY = dx * sin(rad) + dy * cos(rad);
+
+    return (
+        abs(localX) <= h_obdata[i].width / 2 &&
+        abs(localY) <= h_obdata[i].height / 2
+        );
 }
-float2 getpos(bool isspawn) {
+bool rectOverlap(
+    float x1, float y1, float w1, float h1, float r1,
+    float x2, float y2, float w2, float h2, float r2
+)
+{
+   
+    float rad = -r2 * 3.14159265f / 180.0f;
 
-    float x = (isspawn) ? sx(rng) : tx(rng);
-    float y = (isspawn) ? sy(rng) : ty(rng);
+    float dx = x1 - x2;
+    float dy = y1 - y2;
 
+    float localX = dx * cos(rad) - dy * sin(rad);
+    float localY = dx * sin(rad) + dy * cos(rad);
+
+    return (
+        abs(localX) <= (w1 + w2) / 2 &&
+        abs(localY) <= (h1 + h2) / 2
+        );
+}
+h_float2 getpos(bool isspawn)
+{
+    constexpr float EPSILON = 10.0f;
+
+    while (true)
+    {
+        float px = (isspawn) ? sx(rng) : tx(rng);
+        float py = (isspawn) ? sy(rng) : ty(rng);
+
+        bool overlapping = false;
+
+        for (int i = 0; i < settings.random_obstacles_count; i++)
+        {
+            if (rectOverlap(
+                px, py,
+                EPSILON * 2, EPSILON * 2, 0,
+                h_obdata[i].x,
+                h_obdata[i].y,
+                h_obdata[i].width,
+                h_obdata[i].height,
+                h_obdata[i].rotation
+            ))
+            {
+                overlapping = true;
+                break;
+            }
+        }
+
+        if (!overlapping)
+            return { px, py };
+    }
 }
 void randomobs() {
     settings.obstacles = 0;
@@ -459,26 +513,44 @@ void randomobs() {
             o.b = 0.2f;
         }
         else {
-         
-            o.x = x(rng);
-            o.y = y(rng);
-            o.height = h(rng);
-            o.width = w(rng);
-            o.rotation = r(rng);
-            o.r = 0.2f;
-            o.g = 0.2f;
-            o.b = 0.2f;
+            while (true)
+            {
+                o.x = x(rng);
+                o.y = y(rng);
+                o.height = h(rng);
+                o.width = w(rng);
+                o.rotation = r(rng);
+
+                bool overlap = false;
+
+                for (auto& old : h_obdata)
+                {
+                    if (rectOverlap(
+                        o.x, o.y, o.width, o.height, o.rotation,
+                        old.x, old.y, old.width, old.height, old.rotation
+                    ))
+                    {
+                        overlap = true;
+                        break;
+                    }
+                }
+
+                if (!overlap)
+                    break;
+            }
         }
         h_obdata.push_back(o);
         settings.obstacles++;
     }
 
 
-    settings.spawnx = sx(rng);
-    settings.spawny = sy(rng);
-    settings.targetx = tx(rng);
-    settings.targety = ty(rng);
+   h_float2 spawn = getpos(true);
+   h_float2 target = getpos(false);
+    settings.spawnx = spawn.x;
+    settings.spawny = spawn.y;
 
+    settings.targetx = target.x;
+    settings.targety = target.y;
     copyobsdata();
     bake_segments();
 }

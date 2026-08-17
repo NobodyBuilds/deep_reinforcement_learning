@@ -153,7 +153,7 @@ struct replaybuffer {
 	
 	bool done;
 };
-struct float2 {
+struct h_float2 {
 	float x;
 	float y;
 };

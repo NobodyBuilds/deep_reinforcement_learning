@@ -14,6 +14,7 @@
 #include "obstacles.h"
 #include "draw.h"
 #include <curand_kernel.h>
+#include <fstream>
 
 
 curandState* d_rngstate;
@@ -158,28 +159,112 @@ __device__  int caridx(int off,int k,int ci) {
 	return(off + k) * d.numcars + ci;
 }
 
+void readfiles(const std::string& dir, std::vector<float>& container)
+{
+	container.clear();
+	std::fstream file(dir, std::ios::in);
+	if (!file.is_open())
+	{
+		std::cerr << "Error opening " << dir << " file" << std::endl;
+		return;
+	}
+	
+	std::string val;
+	
+	while (file >> val)
+	{
+		container.push_back(std::stof(val));
+		
+	}
+}
+
+
 void initWB(float min, float max) {
 
 
 
-	actor_weights.resize(actor_weightbuffersize);
-	actor_bias.resize(actor_biassize);
+	
+	bool weightsloaded = true;
+	readfiles("modeldata/actorweights.txt", actor_weights);
+	readfiles("modeldata/criticweights.txt", critic_weights);
+	readfiles("modeldata/actorbias.txt", actor_bias);
+	readfiles("modeldata/criticbias.txt", critic_bias);
+	if (actor_weights.size() != actor_weightbuffersize) {
+		printf("%d / %d \n", actor_weights.size(),actor_weightbuffersize);
+		weightsloaded = false;
+	}
+	if (critic_weights.size() != critic_weightbuffersize) {
+		weightsloaded = false;
+	}
+	if (actor_bias.size() != actor_biassize) {
+		weightsloaded = false;
+	}
+	if (critic_bias.size() != critic_biassize) {
+		weightsloaded = false;
+	}
+	if (!weightsloaded) {
+		printf("weights loading error ,generating new weights\n");
+		actor_bias.clear();
+		critic_bias.clear();
+		actor_weights.clear();
+		critic_weights.clear();
+		actor_weights.resize(actor_weightbuffersize);
+		actor_bias.resize(actor_biassize);
 
-	critic_weights.resize(critic_weightbuffersize);
-	critic_bias.resize(critic_biassize);
+		critic_weights.resize(critic_weightbuffersize);
+		critic_bias.resize(critic_biassize);
+		std::mt19937 rng(42);
+		std::uniform_real_distribution<float> dist(min, max);
+		//actor network weights and bias
+		for (int i = 0; i < actor_weightbuffersize; i++) actor_weights[i] = dist(rng);
+		for (int i = 0; i < actor_biassize; i++) actor_bias[i] = dist(rng);
+		//critic network weights and bias
+		for (int i = 0; i < critic_weightbuffersize; i++) critic_weights[i] = dist(rng);
+		for (int i = 0; i < critic_biassize; i++) critic_bias[i] = dist(rng);
+
+	}
+	else {
+		printf("weights loaded from files\n");
+	}
+}
+void write_file(const std::string &address,std::vector<float> &arr) {
 
 
-	std::mt19937 rng(42);
-	std::uniform_real_distribution<float> dist(min, max);
-	//actor network weights and bias
-	for (int i = 0; i < actor_weightbuffersize; i++) actor_weights[i] = dist(rng);
-	for (int i = 0; i < actor_biassize; i++) actor_bias[i] = dist(rng);
-	//critic network weights and bias
-	for (int i = 0; i < critic_weightbuffersize; i++) critic_weights[i] = dist(rng);
-	for (int i = 0; i < critic_biassize; i++) critic_bias[i] = dist(rng);
+	std::ofstream file(address, std::ios::trunc);
+	if (!file.is_open())
+	{
+		std::cerr << "Error opening" <<address<< "for writing" << std::endl;
+	}
+	for (float v : arr)
+		file << v << " ";
+	file << "\n";
 
+	file.close();
 
 }
+void save_weights() {
+
+
+	cudaMemcpy(actor_weights.data(), d_actor_weights, actor_weightbuffersize * sizeof(float), cudaMemcpyDeviceToHost);
+	cudaMemcpy(critic_weights.data(), d_critic_weights, critic_weightbuffersize * sizeof(float), cudaMemcpyDeviceToHost);
+	cudaMemcpy(actor_bias.data(), d_actor_bias, actor_biassize * sizeof(float), cudaMemcpyDeviceToHost);
+	cudaMemcpy(critic_bias.data(), d_critic_bias, critic_biassize * sizeof(float), cudaMemcpyDeviceToHost);
+	cudaError_t err = cudaGetLastError();
+	if (err) {
+		printf(" memcpy grom device to save weights failed %s \n", cudaGetErrorString(err));
+	}
+	std::remove("modeldata/actorweights.txt");
+	std::remove("modeldata/criticweights.txt");
+	std::remove("modeldata/actorbias.txt");
+	std::remove("modeldata/criticbias.txt");
+
+	write_file("modeldata/actorweights.txt", actor_weights);
+	write_file("modeldata/criticweights.txt", critic_weights);
+	write_file("modeldata/actorbias.txt", actor_bias);
+	write_file("modeldata/criticbias.txt", critic_bias);
+	printf("weights saved \n");
+}
+
 __device__ float MSE = 0.0f;
 
 

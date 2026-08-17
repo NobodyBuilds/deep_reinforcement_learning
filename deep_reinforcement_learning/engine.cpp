@@ -76,7 +76,7 @@ int main() {
 			settings.nextgen = true;
 			if (settings.randomobstacles) {
 				randomobs();
-				printf("called \n");
+				
 			}
 			restartgeneration();
 		}
@@ -98,6 +98,7 @@ int main() {
 
 
 	}
+	save_weights();
 	unregister();
 	unregisterobs();
 	clearvectors();

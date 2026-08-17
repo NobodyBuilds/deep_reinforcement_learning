@@ -11,4 +11,5 @@ extern "C" {
 	void restart();
 	void reward(int s);
 	void run_network();
+	void save_weights();
 }
