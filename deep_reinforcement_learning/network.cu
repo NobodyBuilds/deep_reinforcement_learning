@@ -15,6 +15,10 @@
 #include "draw.h"
 #include <curand_kernel.h>
 #include <fstream>
+#include <chrono>
+#include <thread>
+#include <unordered_set>
+
 
 /*
 startd this project fully prerpared and planned,the render,physics is ok .
@@ -23,7 +27,24 @@ when writing ppo i understood everything but after countless bug fixes and tunin
 idk how its still working it got too complex that now i dont even know what the code is doing in some places
 and adding changes and finding bugs is very complex now.
 
+im tired of this project i wanna complete it and then learn pytorch
+
 */
+
+
+
+
+void geterror(const std::string& label, cudaError_t err) {
+	static std::unordered_set<std::string> printed;
+
+	if (printed.find(label) == printed.end())
+	{
+		if (err != cudaSuccess) {
+			printf("%s error : %s \n", label.c_str(), cudaGetErrorString(err));
+		}
+		printed.insert(label);
+	}
+}
 
 curandState* d_rngstate;
 struct ddata {
@@ -220,8 +241,9 @@ void initWB(float min, float max) {
 
 		critic_weights.resize(critic_weightbuffersize);
 		critic_bias.resize(critic_biassize);
+		float bound = sqrtf(60.0f / (24 + 6));
 		std::mt19937 rng(42);
-		std::uniform_real_distribution<float> dist(min, max);
+		std::uniform_real_distribution<float> dist(-bound, bound);
 		//actor network weights and bias
 		for (int i = 0; i < actor_weightbuffersize; i++) actor_weights[i] = dist(rng);
 		for (int i = 0; i < actor_biassize; i++) actor_bias[i] = dist(rng);
@@ -275,7 +297,7 @@ void save_weights() {
 __device__ double MSE = 0.0f;
 
 
-__device__  int batchsize = 256;
+__device__  int batchsize = 2048;
 
 
 __device__ float leakyrelu(float x) {
@@ -334,7 +356,7 @@ __global__ void firstlayer(int n, bool isactor, int s, const float4* __restrict_
 
 	float input[24] = { sinf(angle), cosf(angle),
 									targetForward,targetSide,
-									c2.w / d.maxsteer,
+									c2.w /( d.maxsteer * (CUDART_PI_F / 180.0f)),
 									c.w / d.maxspeed,
 									targetinsight,
 									rays[0].len[0] / d.raymaxdist,
@@ -429,7 +451,7 @@ __global__ void compute_delta(int n, int d, int l1_nout, int l1w, int l1_nin, in
 	if (i >= n)return;
 
 	int bidx = indices[s * batchsize + b];
-	if (buffer[bidx].valid) {
+	
 		float target = buffer[bidx].rtg;
 		if (outlayer) {
 			if (isactor) {
@@ -459,10 +481,8 @@ __global__ void compute_delta(int n, int d, int l1_nout, int l1w, int l1_nin, in
 			}
 			dDelta[b * nodedatasize + d + i] = sum * dslope(dpreact[b * nodedatasize + d + i]);
 		}
-	}
-	else {
-		dDelta[b * nodedatasize + d + i] = 0.0f;
-	}
+	
+	
 	
 }
 __global__ void tuneweights(int n, int nin, int l, int l1d, int lw, int lsize, int d, int lb, float lr, float* dNodeData, float* dWeights, float* dDelta, float* dBias, const replaybuffer* __restrict__ buffer, int s, int curbatch, int nodedatasize, int* indices,bool isactor) {
@@ -475,7 +495,7 @@ __global__ void tuneweights(int n, int nin, int l, int l1d, int lw, int lsize, i
 	float biasgrad = 0.0f;
 	for (int b = 0; b < curbatch; b++)
 		biasgrad += dDelta[b * nodedatasize + d + i];
-	float dlr = (isactor) ? 0.001f : lr;//experiment with different lr
+	float dlr =  lr;//TODO add adam
 	float bupdate = dlr * (biasgrad / curbatch);
 	bupdate= clamp(bupdate, -0.05f, 0.05f);
 	dBias[lb + i] -=bupdate;
@@ -493,6 +513,11 @@ __global__ void tuneweights(int n, int nin, int l, int l1d, int lw, int lsize, i
 		wupdate = clamp(wupdate, -0.05f, 0.05f);
 		dWeights[lw + i * lsize + k] -=wupdate ;
 	}
+}
+__device__ float sigmoid(float x) {
+
+	return  1.0f / (1.0f + expf(-x));
+
 }
 __device__ void getoutput(int D, float* nodevals, float4* carcontrol, replaybuffer* buffer, int s,int ci, curandState* d_rngstate) {
 	int action = 0;
@@ -521,17 +546,17 @@ __device__ void getoutput(int D, float* nodevals, float4* carcontrol, replaybuff
 	for (int j = 0; j < 6; j++) {
 		cum += nodevals[caridx(D , j,ci)];
 
-		if (r <= cum) { action = j; break; }
+		if (r <= cum||j==5) { action = j; break; }
 	}
 	buffer[bidx].action = action;
 
 	float4 cc = make_float4(0.f, 0.f, 0.f, 0.f);
-	if (buffer[bidx].action == 0) cc.x = 1.0f; // forward
-	else if (buffer[bidx].action == 1) cc.y = 1.0f; // backward
-	else if (buffer[bidx].action == 2) cc.z = 1.0f; // left
-	else if (buffer[bidx].action == 3) cc.w = 1.0f; // right
-	else if (buffer[bidx].action == 4) { cc.x = 1.0f; cc.w = 1.0f; } // fprward+right
-	else if (buffer[bidx].action == 5) { cc.x = 1.0f; cc.z = 1.0f; }// forward+left
+	if (buffer[bidx].action == 0) cc.x = sigmoid(nodevals[caridx(D, 0, ci)]); // forward
+	else if (buffer[bidx].action == 1) cc.y= sigmoid(nodevals[caridx(D, 1, ci)]); // backward
+	else if (buffer[bidx].action == 2) cc.z = tanh(nodevals[caridx(D,2,ci)]); // left
+	else if (buffer[bidx].action == 3) cc.w = tanh(nodevals[caridx(D, 3, ci)]); // right
+	else if (buffer[bidx].action == 4) { cc.x = sigmoid(nodevals[caridx(D, 4, ci)]); cc.w = tanh(nodevals[caridx(D, 3, ci)]); } // fprward+right
+	else if (buffer[bidx].action == 5) { cc.x = sigmoid(nodevals[caridx(D, 5, ci)]); cc.z = tanh(nodevals[caridx(D, 2, ci)]); }// forward+left
 	carcontrol[ci] = cc;
 
 	buffer[bidx].old_logprob = logf(fmaxf(nodevals[caridx(D, action,ci)],1e-8f));
@@ -636,29 +661,37 @@ __device__ void getQvalue(int s,int c, int D, float* nodevals, replaybuffer* buf
 __global__ void computevalskernel(int cars,int ticks, replaybuffer* buffer) {
 	int c = blockIdx.x * blockDim.x + threadIdx.x;
 	if (c >= cars) return;
-	float y = 0.98f;
-	for (int t = 0; t < ticks; t++) {
+	float y = 0.99f;
+	float gae = 0;
+	for (int t = ticks-1; t >=0; t--) {
 		int i = t * cars + c;
-		
-		float val = buffer[i].reward;
-		bool hitDone = buffer[i].done;
-		int lastU = t;
-		if (!hitDone ) {
-			for (int u = t + 1; u < ticks; u++) {
-				int j = u * cars + c;
-				val += buffer[j].reward * powf(y, u - t);
-				lastU = u;
-				if (buffer[j].done) { hitDone = true; break; }
-			}
-		}
-		if (!hitDone) {
-			int edgeIdx = lastU * cars + c;
-			val += powf(y, lastU - t + 1) * buffer[edgeIdx].value; 
-		}
-		buffer[i].rtg = val;
-		buffer[i].advantage = buffer[i].rtg - buffer[i].value;
-		double a = buffer[i].advantage;
-		atomicAdd(&MSE, a *a);
+		int next = (t + 1) * cars + c;
+
+		float nextValue = 0.0f;
+
+		if (t != ticks - 1)
+			nextValue = buffer[next].value;
+
+
+		float mask = 1.0f - buffer[i].done;
+
+
+		float delta =
+			buffer[i].reward
+			+ y * nextValue * mask
+			- buffer[i].value;
+
+
+		gae =
+			delta
+			+ y * 0.95 * mask * gae;
+
+
+		buffer[i].advantage = gae;
+		buffer[i].rtg = gae + buffer[i].value;
+
+
+		atomicAdd(&MSE, gae * gae);
 	}
 }
 __device__ double d_adv_mean;
@@ -1006,32 +1039,32 @@ void run_network() {
 	settings.step++;
 	if (  settings.step >= settings.replaybuffersize / settings.cars && settings.training) {
 		settings.rolloutstep++;
-		for (int i = 0; i < 3; i++) {
+		auto start = std::chrono::high_resolution_clock::now();
 			computevals();
+		for (int i = 0; i < 3; i++) {
 			shuffleindices();
 			frozennet(false);//critic backprop
 			normalize_advantages();
 			frozennet(true);//actor backprop
 			settings.oldmloss = settings.mloss;
 			double l = 0.0f;
-			cudaMemcpyFromSymbol(&l, MSE, sizeof(double));
+			cudaError_t err =cudaMemcpyFromSymbol(&l, MSE, sizeof(double));
+			geterror("mse cpy from symbol", err);
 			settings.mloss = (l / (double)settings.replaybuffersize);
 			double zz = 0;
 			cudaMemcpyToSymbol(MSE, &zz, sizeof(double));
 
-			cudaError_t err = cudaGetLastError();
-			if (err != cudaSuccess) {
-				printf("rollout error %s\n ", cudaGetErrorString(err));
-			}
+			
 
-			err = cudaMemcpyFromSymbol(&h_reward, d_reward, sizeof(float));
+			 err = cudaMemcpyFromSymbol(&h_reward, d_reward, sizeof(float));
 			cudaMemcpyToSymbol(d_reward, &zero, sizeof(float));
 			rewardgraph.push_back((h_reward / settings.replaybuffersize));
-			if (err != cudaSuccess) {
-				printf("!ERROR! reward memcpy to host failed %s \n", cudaGetErrorString(err));
-			}
+			geterror("reward cpy from symbol", err);
 		}
-		
+		auto end = std::chrono::steady_clock::now();
+
+		std::chrono::duration<double> elapsed = end - start;
+		settings.rollout_time = elapsed.count();
 	}
 	if (settings.step >= settings.replaybuffersize / settings.cars)	settings.step = 0;
 	
@@ -1046,9 +1079,7 @@ void shuffleindices() {
 	std::shuffle(shuffled_indices.begin(), shuffled_indices.end(), shuffleRng);
 	cudaMemcpy(d_indices, shuffled_indices.data(), settings.replaybuffersize * sizeof(int), cudaMemcpyHostToDevice);
 	cudaError_t err = cudaGetLastError();
-	if (err != cudaSuccess) {
-		printf(" indices copy to gpu failed %s \n", cudaGetErrorString(err));
-	}
+	geterror("indices copy", err);
 }
 
 void allocatenetmem() {

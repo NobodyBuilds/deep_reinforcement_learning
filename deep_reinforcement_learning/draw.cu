@@ -309,9 +309,7 @@ extern "C" void drawrays() {
     render2d.drawlineinstancedbyinterop(16,1);
     render2d.drawcircleinstancedbyinterop(16, 1);
     cudaError_t err = cudaGetLastError();
-    if (err) {
-        printf("draw rays error %s \n", cudaGetErrorString(err));
-    }
+    geterror("draw rays", err);
 }
 
 
@@ -360,14 +358,10 @@ extern "C" void stepcars() {
     
     moverkernel << <blocks(settings.cars), threads >> > (settings.cars,settings.dt, data1,data2, carcontrol,alive,rays);
     cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        printf("mover kernel recieved corrupted data ->%s \n", cudaGetErrorString(err));
-    }
+    geterror("mover kernel", err);
     checkcolison();
      err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        printf("check colision  recieved corrupted data ->%s \n", cudaGetErrorString(err));
-    }
+     geterror("colision", err);
     checkstate();
    
   

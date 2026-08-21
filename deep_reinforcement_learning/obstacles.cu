@@ -124,11 +124,9 @@ extern "C" void initobstacles() {
 
 extern "C" void copyobsdata() {
     cudaError_t err = cudaMemcpy(obstacle, h_obdata.data(), settings.obstacles * sizeof(quadvertex2d), cudaMemcpyHostToDevice);
-    if (err!= cudaSuccess) {
-        printf("obstacle memcpy error %s\n", cudaGetErrorString(err));
-    }
-
-
+ 
+    geterror("line 127:copy obstacle data", err);
+   
 }
 
 extern "C" void addobstacle(float x, float y ,float rot,float width,float height) {
@@ -217,9 +215,7 @@ extern "C" void bake_segments() {
 
     setsegments << <blocks(settings.obstacles), threads >> > (settings.obstacles, segments, obstacle);
     cudaError_t err = cudaGetLastError();
-    if (err) {
-        printf("bake segment error %s\n", cudaGetErrorString(err));
-    }
+    geterror("set segments", err);
     
 }
 
@@ -299,9 +295,9 @@ extern "C" void setrayexitdist() {
     }
     cudaMemcpyToSymbol(d_rayexitdist, rayexitdist,  sizeof(rayexitdist));
     cudaError_t err = cudaGetLastError();
-        if (err) {
-            printf(" setrayexit error %s \n", cudaGetErrorString(err));
-        }
+    
+    geterror("ray memcpy ", err);
+    
 }
 
 __device__ int Alive;
@@ -311,7 +307,7 @@ __global__ void checkstatekernel(int n,int* alive,float4* data1,float4* data2, r
     bool win = false;
     int bidx = s * n + i;
     if (alive[i] == 1) {
-        buffer[bidx].valid = true;
+       
         float4 c = __ldg(&data1[i]);
         float dx = tx - c.x;
         float dy = ty - c.y;
@@ -346,7 +342,7 @@ __global__ void checkstatekernel(int n,int* alive,float4* data1,float4* data2, r
             if (dead) {
                 alive[i] = newState;
                 buffer[bidx].done = true;
-                data2[i].x = maxd;
+              //  data2[i].x = maxd;
                 
 
 
@@ -365,7 +361,7 @@ __global__ void checkstatekernel(int n,int* alive,float4* data1,float4* data2, r
 
     }
     else {
-        buffer[bidx].valid = false;
+       
         buffer[bidx].done = true;
         
     }
@@ -389,14 +385,10 @@ extern "C" void checkstate() {
   if (a == settings.cars) {
       settings.alive = false;
   }
-   if (err !=cudaSuccess) {
-       printf("checkstate alive memcpy error %s\n", cudaGetErrorString(err));
-   }
+  geterror("alive cpy from symbol", err);
   int zero = 0;
   err=cudaMemcpyToSymbol(Alive, &zero, sizeof(int));
-  if (err != cudaSuccess) {
-      printf("checkstate alive reset error %s\n", cudaGetErrorString(err));
-  }
+  geterror("alive set to symbol", err);
 }
 
 void unregisterobs() {
