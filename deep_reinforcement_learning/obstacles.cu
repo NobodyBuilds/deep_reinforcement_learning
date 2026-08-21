@@ -419,7 +419,7 @@ void clearvectors() {
     shuffled_indices.clear();
     h_obdata.clear();
 }
-std::mt19937 rng(42);
+std::mt19937 rng(65);
 std::uniform_real_distribution<float> x(50.0f, 1750.0f);
 
 std::uniform_real_distribution<float> sx(100.0f, 700.0f);

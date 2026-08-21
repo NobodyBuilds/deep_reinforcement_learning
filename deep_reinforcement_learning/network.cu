@@ -16,6 +16,14 @@
 #include <curand_kernel.h>
 #include <fstream>
 
+/*
+startd this project fully prerpared and planned,the render,physics is ok .
+for learning first i used neuevolution,then tried dqn now on ppo.
+when writing ppo i understood everything but after countless bug fixes and tuning of many things 
+idk how its still working it got too complex that now i dont even know what the code is doing in some places
+and adding changes and finding bugs is very complex now.
+
+*/
 
 curandState* d_rngstate;
 struct ddata {
@@ -264,7 +272,7 @@ void save_weights() {
 	printf("weights saved \n");
 }
 
-__device__ float MSE = 0.0f;
+__device__ double MSE = 0.0f;
 
 
 __device__  int batchsize = 256;
@@ -649,7 +657,8 @@ __global__ void computevalskernel(int cars,int ticks, replaybuffer* buffer) {
 		}
 		buffer[i].rtg = val;
 		buffer[i].advantage = buffer[i].rtg - buffer[i].value;
-		atomicAdd(&MSE, buffer[i].advantage * buffer[i].advantage);
+		double a = buffer[i].advantage;
+		atomicAdd(&MSE, a *a);
 	}
 }
 __device__ double d_adv_mean;
@@ -1004,11 +1013,11 @@ void run_network() {
 			normalize_advantages();
 			frozennet(true);//actor backprop
 			settings.oldmloss = settings.mloss;
-			float l = 0.0f;
-			cudaMemcpyFromSymbol(&l, MSE, sizeof(float));
-			settings.mloss = (l / ((float)settings.replaybuffersize) / settings.cars);
-
-			cudaMemcpyToSymbol(MSE, &zero, sizeof(float));
+			double l = 0.0f;
+			cudaMemcpyFromSymbol(&l, MSE, sizeof(double));
+			settings.mloss = ((l / ((double)settings.replaybuffersize) / settings.cars);
+			double zz = 0;
+			cudaMemcpyToSymbol(MSE, &zz, sizeof(double));
 
 			cudaError_t err = cudaGetLastError();
 			if (err != cudaSuccess) {

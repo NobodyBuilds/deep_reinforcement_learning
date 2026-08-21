@@ -41,8 +41,8 @@ struct param {
 	float obheight = 50.0f;
 	float trainspeed = 1.0f;
 	float gentime = 60.0f;
-	float mloss = 0.0f;
-	float oldmloss = 0.0f;
+	double mloss = 0.0f;
+	double oldmloss = 0.0f;
 	
 	float lr = 3e-4f;
 	int bestcar = 0;
