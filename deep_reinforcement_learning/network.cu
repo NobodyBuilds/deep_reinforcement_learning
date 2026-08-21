@@ -1015,7 +1015,7 @@ void run_network() {
 			settings.oldmloss = settings.mloss;
 			double l = 0.0f;
 			cudaMemcpyFromSymbol(&l, MSE, sizeof(double));
-			settings.mloss = ((l / ((double)settings.replaybuffersize) / settings.cars);
+			settings.mloss = (l / (double)settings.replaybuffersize);
 			double zz = 0;
 			cudaMemcpyToSymbol(MSE, &zz, sizeof(double));
 
