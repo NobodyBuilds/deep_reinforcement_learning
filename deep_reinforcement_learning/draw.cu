@@ -378,7 +378,8 @@ extern "C" void draw() {
 
     
         drawobstacles();
-        drawrays();
+
+       if(settings.render_rays) drawrays();
         drawcars();
         drawdummy();
         ui_draw();

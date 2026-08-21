@@ -44,33 +44,40 @@ struct param {
 	float mloss = 0.0f;
 	float oldmloss = 0.0f;
 	
-	float lr = 1e-3f;
+	float lr = 3e-4f;
 	int bestcar = 0;
 	int inputs = 24;
 	int step = 0;
 	int rolloutstep = 0;
-	int replaybuffersize = 4096;
 	int c = 1000;
 	int gen = 1;
 	int fpsCount = 0;
-	int cars =128 ;
+	int cars =64 ;
+	int replaybuffersize = cars * 2048;
 	int samplecar = cars;
 	int rays = 16;
 	int actor_layers = 0;
 	int critic_layers = 0;
 	int obstacles = 0;
 	int max_obstacles = 256;
-	int random_obstacles_count = 20;
+	int random_obstacles_count = 24;
 	bool addingobstacle = false;
 	bool alive = true;
 	bool nextgen = false;
-	bool randomobstacles = false;
-
+	bool randomobstacles = true;
+	bool training = true;
+	bool render_rays = false;
 	
 };
-
+ 
+inline int hbatchsize = 256;
+inline int randomobshold = 0;
 inline int steps = 0;
 
+inline float reach_reward = 10.0f;
+inline float crash_penality = 5.0f;
+inline float diff_change_reward = 1.0f;
+inline float danger_penalty = 1.0f;
 inline param settings;
 
 //constant data
@@ -150,7 +157,7 @@ struct replaybuffer {
 	float rtg;
 	float advantage;
 	int action;
-	
+	bool valid;
 	bool done;
 };
 struct h_float2 {

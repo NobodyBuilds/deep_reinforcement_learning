@@ -90,7 +90,6 @@ int actor_biassize = 0;
 int critic_biassize = 0;
 int actor_nodedatasize = 0;
 int critic_nodedatasize = 0;
-int hbatchsize = 64;
 int carsnodesize = 0;
 
 void addlayer(int in, int out, bool isactor) {
@@ -268,7 +267,7 @@ void save_weights() {
 __device__ float MSE = 0.0f;
 
 
-__device__  int batchsize = 64;
+__device__  int batchsize = 256;
 
 
 __device__ float leakyrelu(float x) {
@@ -396,7 +395,7 @@ __device__ float clamp(float val, float min, float max) {
 __device__ float get_lClip(replaybuffer* buffer, int s) {
 
 
-	float diff = clamp(buffer[s].logprob - buffer[s].old_logprob, -20, 20);
+	float diff = clamp(buffer[s].logprob - buffer[s].old_logprob, -4, 4);
 	float r = expf(diff);
 	
 	float ep = 0.2f;
@@ -413,45 +412,52 @@ __device__ float get_lClip(replaybuffer* buffer, int s) {
 	}
 	return clipped_out;
 }
-__device__ float beta = 0.02f;
+__device__ float beta = 0.05f;
 __global__ void compute_delta(int n, int d, int l1_nout, int l1w, int l1_nin, int l1d, bool outlayer, bool isactor, float* nodedata, float* dDelta, float* dWeights, float* dpreact, replaybuffer* buffer, int s, int* indices, int nodedatasize,int gen) {
 
 
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	int b = blockIdx.y;
 	if (i >= n)return;
+
 	int bidx = indices[s * batchsize + b];
-	float target =  buffer[bidx].rtg;
-	if (outlayer) {
-		if (isactor) {
-			float coeff = get_lClip(buffer, bidx);
-			float pi_i = nodedata[b * nodedatasize + d + i];      
-			float y = (i == buffer[bidx].action) ? 1.0f : 0.0f;
+	if (buffer[bidx].valid) {
+		float target = buffer[bidx].rtg;
+		if (outlayer) {
+			if (isactor) {
+				float coeff = get_lClip(buffer, bidx);
+				float pi_i = nodedata[b * nodedatasize + d + i];
+				float y = (i == buffer[bidx].action) ? 1.0f : 0.0f;
 
-			float H = 0.0f;
-			for (int j = 0; j < n; j++) {
-				float pj = nodedata[b * nodedatasize + d + j];
-				H -= pj * logf(fmaxf(pj, 1e-8f));
+				float H = 0.0f;
+				for (int j = 0; j < n; j++) {
+					float pj = nodedata[b * nodedatasize + d + j];
+					H -= pj * logf(fmaxf(pj, 1e-8f));
+				}
+
+				float entropybonus = beta * pi_i * (logf(fmaxf(pi_i, 1e-8f)) + H);
+
+				dDelta[b * nodedatasize + d + i] = coeff * (y - pi_i) + entropybonus;
+				
 			}
-			
-			float entropybonus = beta * pi_i * (logf(fmaxf(pi_i, 1e-8f)) + H);
-
-			dDelta[b * nodedatasize + d + i] = coeff * (y - pi_i) + entropybonus;
-			beta= 0.02f * (1.0f / (1.0f + 0.0001f * gen));
+			else {
+				dDelta[b * nodedatasize + d + i] = nodedata[b * nodedatasize + d + i] - target;
+			}
 		}
 		else {
-			dDelta[b * nodedatasize + d + i] = nodedata[b * nodedatasize + d + i] - target;
+			float sum = 0.0f;
+			for (int k = 0; k < l1_nout; k++) {
+				sum += dWeights[l1w + k * l1_nin + i] * dDelta[b * nodedatasize + l1d + k];
+			}
+			dDelta[b * nodedatasize + d + i] = sum * dslope(dpreact[b * nodedatasize + d + i]);
 		}
 	}
 	else {
-		float sum = 0.0f;
-		for (int k = 0; k < l1_nout; k++) {
-			sum += dWeights[l1w + k * l1_nin + i] * dDelta[b * nodedatasize + l1d + k];
-		}
-		dDelta[b * nodedatasize + d + i] = sum * dslope(dpreact[b * nodedatasize + d + i]);
+		dDelta[b * nodedatasize + d + i] = 0.0f;
 	}
+	
 }
-__global__ void tuneweights(int n, int nin, int l, int l1d, int lw, int lsize, int d, int lb, float lr, float* dNodeData, float* dWeights, float* dDelta, float* dBias, const replaybuffer* __restrict__ buffer, int s, int curbatch, int nodedatasize, int* indices) {
+__global__ void tuneweights(int n, int nin, int l, int l1d, int lw, int lsize, int d, int lb, float lr, float* dNodeData, float* dWeights, float* dDelta, float* dBias, const replaybuffer* __restrict__ buffer, int s, int curbatch, int nodedatasize, int* indices,bool isactor) {
 
 
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -461,7 +467,10 @@ __global__ void tuneweights(int n, int nin, int l, int l1d, int lw, int lsize, i
 	float biasgrad = 0.0f;
 	for (int b = 0; b < curbatch; b++)
 		biasgrad += dDelta[b * nodedatasize + d + i];
-	dBias[lb + i] -= lr * (biasgrad / curbatch);
+	float dlr = (isactor) ? 0.001f : lr;//experiment with different lr
+	float bupdate = dlr * (biasgrad / curbatch);
+	bupdate= clamp(bupdate, -0.05f, 0.05f);
+	dBias[lb + i] -=bupdate;
 
 	for (int k = 0; k < nin; k++)
 	{
@@ -472,7 +481,9 @@ __global__ void tuneweights(int n, int nin, int l, int l1d, int lw, int lsize, i
 			float nodeVal = (l == 0) ? buffer[indices[s * batchsize + b]].s1[k] : dNodeData[off + l1d + k];
 			wgrad += dDelta[off + d + i] * nodeVal;
 		}
-		dWeights[lw + i * lsize + k] -= lr * (wgrad / curbatch);
+		float wupdate = dlr * (wgrad / curbatch);
+		wupdate = clamp(wupdate, -0.05f, 0.05f);
+		dWeights[lw + i * lsize + k] -=wupdate ;
 	}
 }
 __device__ void getoutput(int D, float* nodevals, float4* carcontrol, replaybuffer* buffer, int s,int ci, curandState* d_rngstate) {
@@ -543,39 +554,47 @@ __global__ void getlog(int n, int d, int* indices, replaybuffer* buffer, int s, 
 __device__ float d_reward = 0.0f;
 __device__ float oldr = 0.0f;
 __device__ int id = 0;
-__global__ void reward_kernel(int n,int s, replaybuffer* buffer, float4* data1,float4* data2,float4* control, int* alive,ray* rays) {
+__device__ float DT = 1.0f / 120.0f;
+__device__ int logframe = 0;
+__global__ void reward_kernel(int n,int s, replaybuffer* buffer, float4* data1,float4* data2,float4* control, int* alive,ray* rays,float rr,float cp,float dp,float dcr,float sx,float sy) {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= n)return;
 		int bidx = s * d.numcars + i;
 	
 		float4 c = __ldg(&data1[i]);
-		float alivereward = alive[i] == 1 ? 0.0f : -2.0f;
+		float alivereward = alive[i] == 1 ? 0.0f : -cp;
 		if (alive[i] == 2) {
-			alivereward = 25.0f;
+			alivereward = rr;
 		}
 		float dx = c.x - d.targetx;
 		float dy = c.y - d.taregety;
 		float curdist = sqrtf(dx * dx + dy * dy);
 		
-		float forward = (control[i].x > 0.0f) ? 0.1f : -0.05f;
+		
 		float prevdist =  data2[i].x;
-		float diff = prevdist - curdist;
-		float progressreward = 3.0f * (diff / d.raymaxdist);
+		float diff = prevdist  - curdist ;
+		float progressreward = dcr * (diff/(d.maxspeed *DT));
 		data2[i].x = curdist;
-
+		float still = (fabsf(diff) < 0.01f) ? -0.02f : 0.0f;
 		float coneMin = 1.0f;
-		int coneIdx[7] = { 13,14,15,0,1,2,3 };
-		for (int k = 0; k < 7; k++)
-			coneMin = fminf(coneMin, rays[i].len[coneIdx[k]] / d.raymaxdist);
-		float danger = 1.0f - coneMin;
+		float allMin = 1.0f;
+		for (int k = 0; k < 16; k++)
+			allMin = fminf(allMin, rays[i].len[k] / d.raymaxdist);
+		float danger = 1.0f - allMin;
 		float speedfrac = fabsf(c.w) / d.maxspeed;
-		float dangerPenalty = -2.0f * danger * danger * (0.5f + 0.5f * speedfrac); 
-
-		float timepenalty = -0.02f;
+		float dangerPenalty = -dp * danger * danger * (0.5f + 0.5f * speedfrac); 
+		float forward = (control[i].x > 0.0f) ? 0.1f : -0.05f;
+		
 	
-		float reward = progressreward + dangerPenalty + timepenalty + alivereward + forward;
-	
+		float reward = progressreward + dangerPenalty  + alivereward +still ;
+		
+		/*if (logframe >= 1000 ) {
+			printf("progress reward %f \n danger penalty %f \n=============\n total %f \n =============\n", progressreward, dangerPenalty, reward);
+			logframe = 0;
+		}
+		else logframe++;*/
 		buffer[bidx].reward = reward;
+		if (alive[i] == 0)oldr = 0.0f;
 		if (reward > oldr) {
 			if (alive[i] == 1) {
 				id = i;
@@ -583,6 +602,16 @@ __global__ void reward_kernel(int n,int s, replaybuffer* buffer, float4* data1,f
 			}
 		}
 		atomicAdd(&d_reward, reward);
+		if (alive[i] != 1) {
+			alive[i] = 1;
+			data2[i].x = d.maxdisttotarget;
+			data1[i].x = sx;
+			data1[i].y = sy;
+			data1[i].z = 0.0f;
+			data1[i].w = 0.0f;
+			data2[i].w = 0.0f;
+			data2[i].z = 0.0f;
+		}
 	
 }
 __device__ void getQvalue(int s,int c, int D, float* nodevals, replaybuffer* buffer) {
@@ -602,23 +631,33 @@ __global__ void computevalskernel(int cars,int ticks, replaybuffer* buffer) {
 	float y = 0.98f;
 	for (int t = 0; t < ticks; t++) {
 		int i = t * cars + c;
+		
 		float val = buffer[i].reward;
-		for (int u = t + 1; u < ticks; u++) {
-			int j = u * cars + c;
-			val += buffer[j].reward * powf(y, u - t);
-			if (buffer[j].done) break;
+		bool hitDone = buffer[i].done;
+		int lastU = t;
+		if (!hitDone ) {
+			for (int u = t + 1; u < ticks; u++) {
+				int j = u * cars + c;
+				val += buffer[j].reward * powf(y, u - t);
+				lastU = u;
+				if (buffer[j].done) { hitDone = true; break; }
+			}
+		}
+		if (!hitDone) {
+			int edgeIdx = lastU * cars + c;
+			val += powf(y, lastU - t + 1) * buffer[edgeIdx].value; 
 		}
 		buffer[i].rtg = val;
 		buffer[i].advantage = buffer[i].rtg - buffer[i].value;
 		atomicAdd(&MSE, buffer[i].advantage * buffer[i].advantage);
 	}
 }
-__device__ float d_adv_mean;
-__device__ float d_adv_var;
+__device__ double d_adv_mean;
+__device__ double d_adv_var;
 __global__ void compute_adv_stats(int n, replaybuffer* buffer) {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= n) return;
-	float a = buffer[i].advantage;
+	double a = buffer[i].advantage;
 	atomicAdd(&d_adv_mean, a);
 	atomicAdd(&d_adv_var, a * a);
 }
@@ -770,23 +809,23 @@ __global__ void netkernel(int n, const float4* __restrict__ data1, float4* data2
 
 void normalize_advantages() {
 	
-	float zero = 0.0f;
-	cudaMemcpyToSymbol(d_adv_mean, &zero, sizeof(float));
-	cudaMemcpyToSymbol(d_adv_var, &zero, sizeof(float));
+	double zero = 0.0;
+	cudaMemcpyToSymbol(d_adv_mean, &zero, sizeof(double));
+	cudaMemcpyToSymbol(d_adv_var, &zero, sizeof(double));
 
 	int t = 256;
 	int b = (settings.replaybuffersize + t - 1) / t;
 	compute_adv_stats << <b, t >> > (settings.replaybuffersize, d_state);
 	sync();
 
-	float mean = 0.0f, var = 0.0f;
-	cudaMemcpyFromSymbol(&mean, d_adv_mean, sizeof(float));
-	cudaMemcpyFromSymbol(&var, d_adv_var, sizeof(float));
+	double mean = 0.0, var = 0.0;
+	cudaMemcpyFromSymbol(&mean, d_adv_mean, sizeof(double));
+	cudaMemcpyFromSymbol(&var, d_adv_var, sizeof(double));
 	mean /= settings.replaybuffersize;
 	var = var / settings.replaybuffersize - mean * mean;
-	float std = sqrtf(fmaxf(var, 1e-8f));
+	float std = sqrtf(fmaxf((float)var, 1e-8f));
 
-	normalize_advantages << <b, t >> > (settings.replaybuffersize, d_state, mean, std);
+	normalize_advantages << <b, t >> > (settings.replaybuffersize, d_state, (float)mean, std);
 }
 void runfrozennet(int s, int curbatch, bool isactor) {
 	auto& layerdata = (isactor) ? actor_layerdata : critic_layerdata;
@@ -839,7 +878,7 @@ void runfrozennet(int s, int curbatch, bool isactor) {
 
 }
 void reward(int s) {
-	reward_kernel << <blocks(settings.cars), threads >> > (settings.cars,s, d_state, data1, data2, carcontrol, alive, rays);
+	reward_kernel << <blocks(settings.cars), threads >> > (settings.cars,s, d_state, data1, data2, carcontrol, alive, rays,reach_reward,crash_penality,danger_penalty,diff_change_reward,settings.spawnx,settings.spawny);
 	int x = 0;
 	float zero = 0;
 	cudaMemcpyFromSymbol(&x, id, sizeof(int));
@@ -899,11 +938,11 @@ void backpropogation(int s, int curBatch, bool isactor) {
 
 		if (isactor) {
 			tuneweights << <blocks, threads >> > (layerdata[l].Nout, nin, l, l1d, lw, lsize, d, lb, settings.lr,
-				d_actor_nodvals, d_actor_weights, d_actor_delta, d_actor_bias, d_state, s, curBatch, actor_nodedatasize, d_indices);
+				d_actor_nodvals, d_actor_weights, d_actor_delta, d_actor_bias, d_state, s, curBatch, actor_nodedatasize, d_indices,true);
 		}
 		else {
 			tuneweights << <blocks, threads >> > (layerdata[l].Nout, nin, l, l1d, lw, lsize, d, lb, settings.lr,
-				d_critic_nodvals, d_critic_weights, d_critic_delta, d_critic_bias, d_state, s, curBatch, critic_nodedatasize, d_indices);
+				d_critic_nodvals, d_critic_weights, d_critic_delta, d_critic_bias, d_state, s, curBatch, critic_nodedatasize, d_indices,false);
 		}
 
 
@@ -946,45 +985,46 @@ void run_network() {
 	reward(settings.step);
 	float h_reward = 0.0f;
 	float zero = 0.0f;
-	steps++;
-	if(settings.nextgen){
+	
+	
 
-		cudaError_t err = cudaMemcpyFromSymbol(&h_reward, d_reward, sizeof(float));
-		cudaMemcpyToSymbol(d_reward, &zero, sizeof(float));
-		rewardgraph.push_back((h_reward / settings.replaybuffersize)/steps);
-		if (err != cudaSuccess) {
-			printf("!ERROR! reward memcpy to host failed %s \n", cudaGetErrorString(err));
-		}
-		settings.nextgen = false;
-		steps = 0;
-	}
+	
+		
+	
 
 
 
 	settings.step++;
-	if (  settings.step >= settings.replaybuffersize / settings.cars) {
+	if (  settings.step >= settings.replaybuffersize / settings.cars && settings.training) {
 		settings.rolloutstep++;
-		computevals();
-		shuffleindices();
-		frozennet(false);//critic backprop
-		normalize_advantages();
-		frozennet(true);//actor backprop
-		settings.oldmloss = settings.mloss;
-		float l = 0.0f;
-		cudaMemcpyFromSymbol(&l, MSE, sizeof(float));
-		settings.mloss = l/(float)settings.replaybuffersize;
-		
-		cudaMemcpyToSymbol(MSE, &zero, sizeof(float));
+		for (int i = 0; i < 3; i++) {
+			computevals();
+			shuffleindices();
+			frozennet(false);//critic backprop
+			normalize_advantages();
+			frozennet(true);//actor backprop
+			settings.oldmloss = settings.mloss;
+			float l = 0.0f;
+			cudaMemcpyFromSymbol(&l, MSE, sizeof(float));
+			settings.mloss = (l / ((float)settings.replaybuffersize) / settings.cars);
 
-		cudaError_t err = cudaGetLastError();
-		if (err != cudaSuccess) {
-			printf("rollout error %s\n ", cudaGetErrorString(err));
+			cudaMemcpyToSymbol(MSE, &zero, sizeof(float));
+
+			cudaError_t err = cudaGetLastError();
+			if (err != cudaSuccess) {
+				printf("rollout error %s\n ", cudaGetErrorString(err));
+			}
+
+			err = cudaMemcpyFromSymbol(&h_reward, d_reward, sizeof(float));
+			cudaMemcpyToSymbol(d_reward, &zero, sizeof(float));
+			rewardgraph.push_back((h_reward / settings.replaybuffersize));
+			if (err != cudaSuccess) {
+				printf("!ERROR! reward memcpy to host failed %s \n", cudaGetErrorString(err));
+			}
 		}
-
-		
-		settings.step = 0;
 		
 	}
+	if (settings.step >= settings.replaybuffersize / settings.cars)	settings.step = 0;
 	
 }
 
@@ -1047,6 +1087,7 @@ void copywbtogpu() {
 
 }
 void restart() {
+	save_weights();
 	std::vector<quadvertex2d> tempob;
 	tempob.resize(settings.obstacles);
 	cudaError_t err= cudaMemcpy(tempob.data(), obstacle, settings.obstacles * sizeof(quadvertex2d), cudaMemcpyDeviceToHost);
@@ -1065,8 +1106,10 @@ void restart() {
 	critic_biassize = 0;
 	actor_nodedatasize = 0;
 	settings.rolloutstep = 0;
+	settings.cars = settings.samplecar;
 	settings.step = 0;
 	settings.gen = 0;
+	settings.replaybuffersize = settings.cars *2048;
 	critic_nodedatasize = 0;
 	settings.actor_layers = 0;
 	settings.critic_layers = 0;
@@ -1098,7 +1141,7 @@ void initnetwork() {
 	settings.replaybuffersize -= settings.replaybuffersize % settings.cars;
 	initlayers();
 
-	initWB(-0.05f, 0.05f);
+	initWB(-0.5f, 0.5f);
 	allocatenetmem();
 	copywbtogpu();
 	allocate();

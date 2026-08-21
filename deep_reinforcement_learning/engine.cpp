@@ -72,11 +72,15 @@ int main() {
 		if (settings.timer >= settings.gentime || !settings.alive ) {
 			settings.timer = 0.0f;
 			settings.gen++;
+		//	settings.step = 0;
+			//cudaMemset(d_state, 0.0f, settings.replaybuffersize * sizeof(replaybuffer));
+
 			settings.alive = true;
 			settings.nextgen = true;
-			if (settings.randomobstacles) {
+			randomobshold++;
+			if (settings.randomobstacles && randomobshold>=10) {
 				randomobs();
-				
+				randomobshold = 0;
 			}
 			restartgeneration();
 		}

@@ -43,6 +43,13 @@ extern "C" void ui_draw() {
         settings.timer = 0.0f;
     }
     ImGui::Checkbox("random obstacles", &settings.randomobstacles);
+    ImGui::Checkbox("training", &settings.training);
+    ImGui::Checkbox("show rays", &settings.render_rays);
+    ImGui::Text("reward");
+    ImGui::DragFloat("win reward", &reach_reward, 0.05f, 0.0f, 999.0f);
+    ImGui::DragFloat("crash penalty", &crash_penality, 0.05f, 0.0f, 999.0f);
+    ImGui::DragFloat("danger penalty", &danger_penalty, 0.05f, 0.0f, 999.0f);
+    ImGui::DragFloat("difference in change reward", &diff_change_reward, 0.05f, 0.0f, 999.0f);
     ImGui::Spacing();
     ImGui::Text("target");
     bool setmax = false;
