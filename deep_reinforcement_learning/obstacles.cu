@@ -553,3 +553,26 @@ void randomobs() {
     bake_segments();
     setmaxdisttotarget();
 }
+
+
+//if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+//camera.position += camera.forward * speed;
+void inputs(GLFWwindow* window) {
+    if (testcontrols) {
+
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)throttle += 1.0f * settings.dt;
+        throttle = hclamp(throttle, -1.0f, 1.0f);
+        if (throttle > 0.0f)throttle -= 0.5f * settings.dt;
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)throttle -= 1.0f * settings.dt;
+        throttle = hclamp(throttle, -1.0f, 1.0f);
+        if (throttle < 0.0f)throttle += 0.5f * settings.dt;
+
+
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)steer += 1.0f * settings.dt;
+        steer = hclamp(steer, -1.0f, 1.0f);
+        if (steer > 0.0f)steer -= 0.5f * settings.dt;
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)steer -= 1.0f * settings.dt;
+        steer = hclamp(steer, -1.0f, 1.0f);
+        if (steer < 0.0f)steer += 0.5f * settings.dt;
+    }
+}

@@ -16,4 +16,5 @@ extern "C" {
 	void unregisterobs();
 	void clearvectors();
 	void randomobs();
+	void inputs(GLFWwindow* window);
 }

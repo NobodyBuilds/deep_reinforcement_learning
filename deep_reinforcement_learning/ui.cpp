@@ -45,6 +45,8 @@ extern "C" void ui_draw() {
     ImGui::Checkbox("random obstacles", &settings.randomobstacles);
     ImGui::Checkbox("training", &settings.training);
     ImGui::Checkbox("show rays", &settings.render_rays);
+    ImGui::Checkbox("test controls" ,&testcontrols);
+    
     ImGui::Text("reward");
     ImGui::DragFloat("win reward", &reach_reward, 0.05f, 0.0f, 999.0f);
     ImGui::DragFloat("crash penalty", &crash_penality, 0.05f, 0.0f, 999.0f);

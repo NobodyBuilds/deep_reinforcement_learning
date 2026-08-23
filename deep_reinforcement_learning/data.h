@@ -53,7 +53,7 @@ struct param {
 	int gen = 1;
 	int fpsCount = 0;
 	int cars =64 ;
-	int replaybuffersize = cars * 2048;
+	int replaybuffersize = cars * 4096;
 	int samplecar = cars;
 	int rays = 16;
 	int actor_layers = 0;
@@ -69,14 +69,19 @@ struct param {
 	bool render_rays = false;
 	
 };
- 
-inline int hbatchsize = 256;
+ //car test controls
+inline float throttle = 0.0f;
+inline float steer = 0.0f;
+inline bool testcontrols = false;
+/// 
+inline int adam_step = 1;
+inline int hbatchsize = 128;
 inline int randomobshold = 0;
 inline int steps = 0;
 
 inline float reach_reward = 10.0f;
 inline float crash_penality = 5.0f;
-inline float diff_change_reward = 1.0f;
+inline float diff_change_reward = 1.5f;
 inline float danger_penalty = 1.0f;
 inline param settings;
 
@@ -146,6 +151,10 @@ inline float* d_critic_delta = nullptr;
 inline int* d_indices = nullptr;
 inline Layer* d_actlayer = nullptr;
 inline Layer* d_critlayer = nullptr;
+inline float2* actor_adam_weights = nullptr;//x== m,y==v
+inline float2* actor_adam_bias = nullptr;//x== m,y==v
+inline float2* critic_adam_weights = nullptr;
+inline float2* critic_adam_bias = nullptr;
 
 struct replaybuffer {
 	float s1[24];

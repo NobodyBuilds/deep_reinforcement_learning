@@ -177,7 +177,9 @@ void initlayers() {
 
 
 }
-
+float hclamp(float val, float min, float max) {
+	return fminf(fmaxf(val, min), max);
+}
 
 
 __host__ __device__ __forceinline__ int idx(int offset, int k) {
@@ -297,7 +299,7 @@ void save_weights() {
 __device__ double MSE = 0.0f;
 
 
-__device__  int batchsize = 2048;
+__device__  int batchsize = 128;
 
 
 __device__ float leakyrelu(float x) {
@@ -440,6 +442,10 @@ __device__ float get_lClip(replaybuffer* buffer, int s) {
 		if (r < 1 - ep) clipped_out = 0;
 		else clipped_out = -adv * r;
 	}
+	
+	//	printf("clip %f \n", clipped_out);
+
+
 	return clipped_out;
 }
 __device__ float beta = 0.05f;
@@ -457,7 +463,7 @@ __global__ void compute_delta(int n, int d, int l1_nout, int l1w, int l1_nin, in
 			if (isactor) {
 				float coeff = get_lClip(buffer, bidx);
 				float pi_i = nodedata[b * nodedatasize + d + i];
-				float y = (i == buffer[bidx].action) ? 1.0f : 0.0f;
+			//	float y = (i == buffer[bidx].action) ? 1.0f : 0.0f;
 
 				float H = 0.0f;
 				for (int j = 0; j < n; j++) {
@@ -467,7 +473,7 @@ __global__ void compute_delta(int n, int d, int l1_nout, int l1w, int l1_nin, in
 
 				float entropybonus = beta * pi_i * (logf(fmaxf(pi_i, 1e-8f)) + H);
 
-				dDelta[b * nodedatasize + d + i] = coeff * (y - pi_i) + entropybonus;
+				dDelta[b * nodedatasize + d + i] = coeff + entropybonus;
 				
 			}
 			else {
@@ -485,19 +491,49 @@ __global__ void compute_delta(int n, int d, int l1_nout, int l1w, int l1_nin, in
 	
 	
 }
-__global__ void tuneweights(int n, int nin, int l, int l1d, int lw, int lsize, int d, int lb, float lr, float* dNodeData, float* dWeights, float* dDelta, float* dBias, const replaybuffer* __restrict__ buffer, int s, int curbatch, int nodedatasize, int* indices,bool isactor) {
 
+__device__ float getmoment(float moment,float gradient,float beta,float betat) {
+	float x = 0.0f;
+	
+		x = beta * moment + (1.0f - beta) * gradient;
+		x = x / betat;
+		return x;
+	
+	
+}
+__device__ float getv(float v,float gradient,float beta,float betat) {
+	float x = 0.0f;
+	
+		x = beta * v + (1.0f - beta) * gradient*gradient;
+		x = x / betat;
+		return x;
+	
+}
+
+__device__ float getlr(float lr, float m, float v, float eps) {
+	return lr * m / (sqrtf(v) + eps);
+}
+
+__global__ void tuneweights(int n, int nin, int l, int l1d, int lw, int lsize, int d, int lb, float lr, float* dNodeData, float* dWeights, float* dDelta, float* dBias, const replaybuffer* __restrict__ buffer, int s, int curbatch, int nodedatasize, int* indices,bool isactor,float2* aweights,float2* abias,int t) {
+
+	float beta1 = 0.9f;
+	float beta2 = 0.999f;
+	float betat1 = 1.0f-powf(beta1, t);
+	float betat2 = 1.0f-powf(beta2, t);
 
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= n)
 		return;
-
+	
 	float biasgrad = 0.0f;
 	for (int b = 0; b < curbatch; b++)
 		biasgrad += dDelta[b * nodedatasize + d + i];
-	float dlr =  lr;//TODO add adam
-	float bupdate = dlr * (biasgrad / curbatch);
-	bupdate= clamp(bupdate, -0.05f, 0.05f);
+	
+	abias[lb + i].x = getmoment(abias[lb + i].x, biasgrad, beta1,betat1);
+	abias[lb + i].y = getv(abias[lb + i].y, biasgrad, beta2,betat2);
+	
+	float bupdate = getlr(0.01f, abias[lb + i].x, abias[lb + i].y,0.00001f);
+	
 	dBias[lb + i] -=bupdate;
 
 	for (int k = 0; k < nin; k++)
@@ -509,8 +545,10 @@ __global__ void tuneweights(int n, int nin, int l, int l1d, int lw, int lsize, i
 			float nodeVal = (l == 0) ? buffer[indices[s * batchsize + b]].s1[k] : dNodeData[off + l1d + k];
 			wgrad += dDelta[off + d + i] * nodeVal;
 		}
-		float wupdate = dlr * (wgrad / curbatch);
-		wupdate = clamp(wupdate, -0.05f, 0.05f);
+		aweights[lw + i * lsize + k].x = getmoment(aweights[lw + i * lsize + k].x, wgrad, beta1,betat1);
+		aweights[lw + i * lsize + k].y = getv(aweights[lw + i * lsize + k].y, wgrad, beta2,betat2);
+		float wupdate = getlr(0.01f, aweights[lw + i * lsize + k].x, aweights[lw + i * lsize + k].y, 0.00001f);
+		//wupdate = clamp(wupdate, -0.05f, 0.05f);
 		dWeights[lw + i * lsize + k] -=wupdate ;
 	}
 }
@@ -606,7 +644,8 @@ __global__ void reward_kernel(int n,int s, replaybuffer* buffer, float4* data1,f
 		
 		float prevdist =  data2[i].x;
 		float diff = prevdist  - curdist ;
-		float progressreward = dcr * (diff/(d.maxspeed *DT));
+		float progressreward =(diff<0.0f)?0.0f: dcr * (diff/(d.maxdisttotarget *DT));
+		//printf("reward :%f \n", progressreward);
 		data2[i].x = curdist;
 		float still = (fabsf(diff) < 0.01f) ? -0.02f : 0.0f;
 		float coneMin = 1.0f;
@@ -621,11 +660,9 @@ __global__ void reward_kernel(int n,int s, replaybuffer* buffer, float4* data1,f
 	
 		float reward = progressreward + dangerPenalty  + alivereward +still ;
 		
-		/*if (logframe >= 1000 ) {
-			printf("progress reward %f \n danger penalty %f \n=============\n total %f \n =============\n", progressreward, dangerPenalty, reward);
-			logframe = 0;
-		}
-		else logframe++;*/
+		
+			//printf("progress reward %f \n danger penalty %f \n=============\n total %f \n =============\n", progressreward, dangerPenalty, reward);
+	
 		buffer[bidx].reward = reward;
 		if (alive[i] == 0)oldr = 0.0f;
 		if (reward > oldr) {
@@ -669,10 +706,10 @@ __global__ void computevalskernel(int cars,int ticks, replaybuffer* buffer) {
 
 		float nextValue = 0.0f;
 
-		if (t != ticks - 1)
+		if (t != ticks - 1) {
 			nextValue = buffer[next].value;
 
-
+		}
 		float mask = 1.0f - buffer[i].done;
 
 
@@ -682,17 +719,20 @@ __global__ void computevalskernel(int cars,int ticks, replaybuffer* buffer) {
 			- buffer[i].value;
 
 
-		gae =
+		gae = 
 			delta
 			+ y * 0.95 * mask * gae;
-
 
 		buffer[i].advantage = gae;
 		buffer[i].rtg = gae + buffer[i].value;
 
 
 		atomicAdd(&MSE, gae * gae);
+		/*if (c == 10&& t==10) {
+			printf("================\ndelta %f \n GAE %f \n adv %f \n rtg %f \n mse %f \n=================\n", delta, gae, gae, buffer[i].rtg, gae * gae);
+		}*/
 	}
+
 }
 __device__ double d_adv_mean;
 __device__ double d_adv_var;
@@ -703,10 +743,14 @@ __global__ void compute_adv_stats(int n, replaybuffer* buffer) {
 	atomicAdd(&d_adv_mean, a);
 	atomicAdd(&d_adv_var, a * a);
 }
-__global__ void normalize_advantages(int n, replaybuffer* buffer, float mean, float std) {
+__global__ void normalize_advantages(int n, replaybuffer* buffer,float mean,float std) {
+	
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= n) return;
 	buffer[i].advantage = (buffer[i].advantage - mean) / (std + 1e-8f);
+
+		
+	
 }
 __global__ void firstlayerfrozen(int n, int s, int* indices, const float* __restrict__ weights, const float* __restrict__ bias, float* nodevals, float* d_preact, replaybuffer* buffer, int nodedatasize)
 {
@@ -852,22 +896,27 @@ __global__ void netkernel(int n, const float4* __restrict__ data1, float4* data2
 void normalize_advantages() {
 	
 	double zero = 0.0;
-	cudaMemcpyToSymbol(d_adv_mean, &zero, sizeof(double));
-	cudaMemcpyToSymbol(d_adv_var, &zero, sizeof(double));
-
+cudaError_t err=	cudaMemcpyToSymbol(d_adv_mean, &zero, sizeof(double));
+geterror("adv mean cpy to symbol", err);
+	err =cudaMemcpyToSymbol(d_adv_var, &zero, sizeof(double));
+	geterror("adv var cpy to symbol", err);
 	int t = 256;
 	int b = (settings.replaybuffersize + t - 1) / t;
 	compute_adv_stats << <b, t >> > (settings.replaybuffersize, d_state);
 	sync();
 
 	double mean = 0.0, var = 0.0;
-	cudaMemcpyFromSymbol(&mean, d_adv_mean, sizeof(double));
-	cudaMemcpyFromSymbol(&var, d_adv_var, sizeof(double));
+	err=cudaMemcpyFromSymbol(&mean, d_adv_mean, sizeof(double));
+	geterror("adv mean cpt from symbol", err);
+	err=cudaMemcpyFromSymbol(&var, d_adv_var, sizeof(double));
+	geterror("adv var cpy from symbol", err);
 	mean /= settings.replaybuffersize;
 	var = var / settings.replaybuffersize - mean * mean;
 	float std = sqrtf(fmaxf((float)var, 1e-8f));
 
-	normalize_advantages << <b, t >> > (settings.replaybuffersize, d_state, (float)mean, std);
+	normalize_advantages << <b, t >> > (settings.replaybuffersize, d_state,(float)mean,std);
+	err = cudaGetLastError();
+	geterror("normalize adv  ",err );
 }
 void runfrozennet(int s, int curbatch, bool isactor) {
 	auto& layerdata = (isactor) ? actor_layerdata : critic_layerdata;
@@ -931,7 +980,7 @@ void reward(int s) {
 void computevals() {
 	
 	computevalskernel << <blocks(settings.cars), threads >> > (settings.cars, settings.replaybuffersize / settings.cars, d_state);
-
+	geterror("compute vals ", cudaGetLastError());
 
 }
 void backpropogation(int s, int curBatch, bool isactor) {
@@ -980,16 +1029,17 @@ void backpropogation(int s, int curBatch, bool isactor) {
 
 		if (isactor) {
 			tuneweights << <blocks, threads >> > (layerdata[l].Nout, nin, l, l1d, lw, lsize, d, lb, settings.lr,
-				d_actor_nodvals, d_actor_weights, d_actor_delta, d_actor_bias, d_state, s, curBatch, actor_nodedatasize, d_indices,true);
+				d_actor_nodvals, d_actor_weights, d_actor_delta, d_actor_bias, d_state, s, curBatch, actor_nodedatasize, d_indices,true,actor_adam_weights,actor_adam_bias,adam_step);
 		}
 		else {
 			tuneweights << <blocks, threads >> > (layerdata[l].Nout, nin, l, l1d, lw, lsize, d, lb, settings.lr,
-				d_critic_nodvals, d_critic_weights, d_critic_delta, d_critic_bias, d_state, s, curBatch, critic_nodedatasize, d_indices,false);
+				d_critic_nodvals, d_critic_weights, d_critic_delta, d_critic_bias, d_state, s, curBatch, critic_nodedatasize, d_indices,false,critic_adam_weights,critic_adam_bias,adam_step);
 		}
 
 
 
 	}
+	adam_step++;
 
 }
 void frozennet(bool isactor) {
@@ -1020,9 +1070,10 @@ void net(int s, bool isactor) {
 }
 
 void run_network() {
-
-	net(settings.step, true);//actor forward pass
-	net(settings.step, false);//critic forward pass
+	if (!testcontrols) {
+		net(settings.step, true);//actor forward pass
+		net(settings.step, false);//critic forward pass
+	}
 	stepcars();
 	reward(settings.step);
 	float h_reward = 0.0f;
@@ -1041,19 +1092,22 @@ void run_network() {
 		settings.rolloutstep++;
 		auto start = std::chrono::high_resolution_clock::now();
 			computevals();
+			settings.oldmloss = settings.mloss;
+			double l = 0.0f;
+			cudaError_t err = cudaMemcpyFromSymbol(&l, MSE, sizeof(double));
+			geterror("mse cpy from symbol", err);
+			settings.mloss = (l / (double)settings.replaybuffersize);
+			double zz = 0;
+			err = cudaMemcpyToSymbol(MSE, &zz, sizeof(double));
+			geterror("mse cpy to symbol", err);
+
 		for (int i = 0; i < 3; i++) {
 			shuffleindices();
 			frozennet(false);//critic backprop
 			normalize_advantages();
 			frozennet(true);//actor backprop
-			settings.oldmloss = settings.mloss;
-			double l = 0.0f;
-			cudaError_t err =cudaMemcpyFromSymbol(&l, MSE, sizeof(double));
-			geterror("mse cpy from symbol", err);
-			settings.mloss = (l / (double)settings.replaybuffersize);
-			double zz = 0;
-			cudaMemcpyToSymbol(MSE, &zz, sizeof(double));
-
+		
+			
 			
 
 			 err = cudaMemcpyFromSymbol(&h_reward, d_reward, sizeof(float));
@@ -1099,7 +1153,15 @@ void allocatenetmem() {
 	cudaMalloc(&d_cars_nodevals, carsnodesize * sizeof(float));
 	cudaMalloc(&d_actlayer, settings.actor_layers * sizeof(Layer));
 	cudaMalloc(&d_critlayer, settings.critic_layers * sizeof(Layer));
+	cudaMalloc(&actor_adam_weights, actor_weightbuffersize * sizeof(float2));
+	cudaMalloc(&actor_adam_bias, actor_biassize * sizeof(float2));
+	cudaMalloc(&critic_adam_weights, critic_weightbuffersize * sizeof(float2));
+	cudaMalloc(&critic_adam_bias, critic_biassize * sizeof(float2));
 
+	cudaMemset(actor_adam_weights, 0.0f, actor_weightbuffersize * sizeof(float2));
+	cudaMemset(actor_adam_bias, 0.0f, actor_biassize * sizeof(float2));
+	cudaMemset(critic_adam_weights, 0.0f, critic_weightbuffersize * sizeof(float2));
+	cudaMemset(critic_adam_bias, 0.0f, critic_biassize * sizeof(float2));
 
 	cudaError_t err = cudaGetLastError();
 	if (err) {
@@ -1149,6 +1211,7 @@ void restart() {
 	settings.cars = settings.samplecar;
 	settings.step = 0;
 	settings.gen = 0;
+	adam_step = 1;
 	settings.replaybuffersize = settings.cars *2048;
 	critic_nodedatasize = 0;
 	settings.actor_layers = 0;

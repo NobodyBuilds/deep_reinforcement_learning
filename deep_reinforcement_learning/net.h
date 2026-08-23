@@ -12,4 +12,5 @@ extern "C" {
 	void reward(int s);
 	void run_network();
 	void save_weights();
+	float hclamp(float v, float min, float max);
 }
