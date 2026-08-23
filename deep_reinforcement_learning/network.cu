@@ -297,7 +297,7 @@ void save_weights() {
 __device__ double MSE = 0.0f;
 
 
-__device__  int batchsize = 2048;
+__device__  int batchsize = 128;
 
 
 __device__ float leakyrelu(float x) {

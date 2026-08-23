@@ -70,7 +70,7 @@ struct param {
 	
 };
  
-inline int hbatchsize = 256;
+inline int hbatchsize = 128;
 inline int randomobshold = 0;
 inline int steps = 0;
 
