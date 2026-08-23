@@ -485,8 +485,32 @@ __global__ void compute_delta(int n, int d, int l1_nout, int l1w, int l1_nin, in
 	
 	
 }
-__global__ void tuneweights(int n, int nin, int l, int l1d, int lw, int lsize, int d, int lb, float lr, float* dNodeData, float* dWeights, float* dDelta, float* dBias, const replaybuffer* __restrict__ buffer, int s, int curbatch, int nodedatasize, int* indices,bool isactor) {
+__device__ float getmoment(float moment, float gradient, float beta, float betat) {
+	float x = 0.0f;
 
+	x = beta * moment + (1.0f - beta) * gradient;
+	x = x / betat;
+	return x;
+
+
+}
+__device__ float getv(float v, float gradient, float beta, float betat) {
+	float x = 0.0f;
+
+	x = beta * v + (1.0f - beta) * gradient * gradient;
+	x = x / betat;
+	return x;
+
+}
+__device__ float getlr(float lr, float m, float v, float eps) {
+	return lr * m / (sqrtf(v) + eps);
+}
+__global__ void tuneweights(int n, int nin, int l, int l1d, int lw, int lsize, int d, int lb, float lr, float* dNodeData, float* dWeights, float* dDelta, float* dBias, const replaybuffer* __restrict__ buffer, int s, int curbatch, int nodedatasize, int* indices,bool isactor,float2* aweights,float2* abias,int t) {
+
+	float beta1 = 0.9f;
+	float beta2 = 0.999f;
+	float betat1 = 1.0f - powf(beta1, t);
+	float betat2 = 1.0f - powf(beta2, t);
 
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= n)
@@ -495,11 +519,15 @@ __global__ void tuneweights(int n, int nin, int l, int l1d, int lw, int lsize, i
 	float biasgrad = 0.0f;
 	for (int b = 0; b < curbatch; b++)
 		biasgrad += dDelta[b * nodedatasize + d + i];
-	float dlr =  lr;//TODO add adam
-	float bupdate = dlr * (biasgrad / curbatch);
-	bupdate= clamp(bupdate, -0.05f, 0.05f);
+	float bm = abias[lb + i].x;
+	float bv = abias[lb + i].y;
+	bm = getmoment(bm, biasgrad / curbatch, beta1, betat1);
+	bv = getv(bv, biasgrad / curbatch, beta2, betat2);
+	float bupdate = getlr(lr, bm, bv, 1e-6f);
+//	bupdate= clamp(bupdate, -0.05f, 0.05f);
 	dBias[lb + i] -=bupdate;
-
+	abias[lb + i].x = bm;
+	abias[lb + i].y = bv;
 	for (int k = 0; k < nin; k++)
 	{
 		float wgrad = 0.0f;
@@ -509,9 +537,16 @@ __global__ void tuneweights(int n, int nin, int l, int l1d, int lw, int lsize, i
 			float nodeVal = (l == 0) ? buffer[indices[s * batchsize + b]].s1[k] : dNodeData[off + l1d + k];
 			wgrad += dDelta[off + d + i] * nodeVal;
 		}
-		float wupdate = dlr * (wgrad / curbatch);
-		wupdate = clamp(wupdate, -0.05f, 0.05f);
+
+		float wm = aweights[lw + i * lsize + k].x;
+		float wv = aweights[lw + i * lsize + k].y;
+		wm = getmoment(wm, wgrad / curbatch, beta1, betat1);
+		wv = getv(wv, wgrad / curbatch, beta2, betat2);
+		float wupdate = getlr(lr,wm,wv,1e-6f);
+		//wupdate = clamp(wupdate, -0.05f, 0.05f);
 		dWeights[lw + i * lsize + k] -=wupdate ;
+		aweights[lw + i * lsize + k].x = wm;
+		aweights[lw + i * lsize + k].y = wv;
 	}
 }
 __device__ float sigmoid(float x) {
@@ -606,7 +641,7 @@ __global__ void reward_kernel(int n,int s, replaybuffer* buffer, float4* data1,f
 		
 		float prevdist =  data2[i].x;
 		float diff = prevdist  - curdist ;
-		float progressreward = dcr * (diff/(d.maxspeed *DT));
+		float progressreward  = (diff < 0.0f) ? 0.0f : dcr * (diff / (d.maxdisttotarget * DT));
 		data2[i].x = curdist;
 		float still = (fabsf(diff) < 0.01f) ? -0.02f : 0.0f;
 		float coneMin = 1.0f;
@@ -980,16 +1015,17 @@ void backpropogation(int s, int curBatch, bool isactor) {
 
 		if (isactor) {
 			tuneweights << <blocks, threads >> > (layerdata[l].Nout, nin, l, l1d, lw, lsize, d, lb, settings.lr,
-				d_actor_nodvals, d_actor_weights, d_actor_delta, d_actor_bias, d_state, s, curBatch, actor_nodedatasize, d_indices,true);
+				d_actor_nodvals, d_actor_weights, d_actor_delta, d_actor_bias, d_state, s, curBatch, actor_nodedatasize, d_indices,true,actor_adam_weights,actor_adam_bias,adam_step);
 		}
 		else {
 			tuneweights << <blocks, threads >> > (layerdata[l].Nout, nin, l, l1d, lw, lsize, d, lb, settings.lr,
-				d_critic_nodvals, d_critic_weights, d_critic_delta, d_critic_bias, d_state, s, curBatch, critic_nodedatasize, d_indices,false);
+				d_critic_nodvals, d_critic_weights, d_critic_delta, d_critic_bias, d_state, s, curBatch, critic_nodedatasize, d_indices,false,critic_adam_weights,critic_adam_bias,adam_step);
 		}
 
 
 
 	}
+	adam_step++;
 
 }
 void frozennet(bool isactor) {
@@ -1099,7 +1135,15 @@ void allocatenetmem() {
 	cudaMalloc(&d_cars_nodevals, carsnodesize * sizeof(float));
 	cudaMalloc(&d_actlayer, settings.actor_layers * sizeof(Layer));
 	cudaMalloc(&d_critlayer, settings.critic_layers * sizeof(Layer));
+	cudaMalloc(&actor_adam_weights, actor_weightbuffersize * sizeof(float2));
+	cudaMalloc(&actor_adam_bias, actor_biassize * sizeof(float2));
+	cudaMalloc(&critic_adam_weights, critic_weightbuffersize * sizeof(float2));
+	cudaMalloc(&critic_adam_bias, critic_biassize * sizeof(float2));
 
+	cudaMemset(actor_adam_weights, 0.0f, actor_weightbuffersize * sizeof(float2));
+	cudaMemset(actor_adam_bias, 0.0f, actor_biassize * sizeof(float2));
+	cudaMemset(critic_adam_weights, 0.0f, critic_weightbuffersize * sizeof(float2));
+	cudaMemset(critic_adam_bias, 0.0f, critic_biassize * sizeof(float2));
 
 	cudaError_t err = cudaGetLastError();
 	if (err) {

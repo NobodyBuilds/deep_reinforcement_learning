@@ -73,7 +73,7 @@ struct param {
 inline int hbatchsize = 128;
 inline int randomobshold = 0;
 inline int steps = 0;
-
+inline int adam_step = 1;
 inline float reach_reward = 10.0f;
 inline float crash_penality = 5.0f;
 inline float diff_change_reward = 1.0f;
@@ -146,6 +146,11 @@ inline float* d_critic_delta = nullptr;
 inline int* d_indices = nullptr;
 inline Layer* d_actlayer = nullptr;
 inline Layer* d_critlayer = nullptr;
+inline float2* actor_adam_weights = nullptr;//x== m,y==v
+inline float2* actor_adam_bias = nullptr;//x== m,y==v
+inline float2* critic_adam_weights = nullptr;
+inline float2* critic_adam_bias = nullptr;
+
 
 struct replaybuffer {
 	float s1[24];
