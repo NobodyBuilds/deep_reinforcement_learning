@@ -313,7 +313,7 @@ extern "C" void drawrays() {
 }
 
 
-__global__ void moverkernel(int n,float dt, float4* car,float4* data2,float4* carcontrol,int* alive,ray* rays,float throttle,float steer, bool test) {
+__global__ void moverkernel(int n,float dt, float4* car,float4* data2,float4* carcontrol,int* alive,ray* rays) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n)return;
 
@@ -323,7 +323,6 @@ __global__ void moverkernel(int n,float dt, float4* car,float4* data2,float4* ca
         float4 cc = __ldg(&carcontrol[i]);
 
         float sterrdir = cc.w - cc.z;
-        if (test)sterrdir = steer;
         float target_steer = sterrdir *(CUDART_PI_F/180.0f)* cd.maxsteer;
         float maxDelta_steer = cd.steerrate * (CUDART_PI_F / 180.0f) * dt;
 
@@ -332,9 +331,6 @@ __global__ void moverkernel(int n,float dt, float4* car,float4* data2,float4* ca
 
         float speed = d1.w;
         float move = cc.x - cc.y;
-        if (test) {
-            move = throttle;
-        }
         float rate = (move>0.0f)? cd.accelrate:cd.brakerate ;
 
 
@@ -360,7 +356,7 @@ __global__ void moverkernel(int n,float dt, float4* car,float4* data2,float4* ca
 
 extern "C" void stepcars() {
     
-    moverkernel << <blocks(settings.cars), threads >> > (settings.cars,settings.dt, data1,data2, carcontrol,alive,rays,throttle,steer,testcontrols);
+    moverkernel << <blocks(settings.cars), threads >> > (settings.cars,settings.dt, data1,data2, carcontrol,alive,rays);
     cudaError_t err = cudaGetLastError();
     geterror("mover kernel", err);
     checkcolison();
