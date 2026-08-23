@@ -25,7 +25,7 @@ struct param {
 	float targetx = 1600.0f, targety = 450.0f;
 	float targetsize = 40.0f;
 	float dumx = 0.0, dumy = 0.0f;
-	float ray_max_len = 250.0f;
+	float ray_max_len = 200.0f;
 	float maxdisttotarget = 0.0f;
 	float maxdisttospawn = 0.0f;
 	float fps = 0.0f;
@@ -44,18 +44,19 @@ struct param {
 	double mloss = 0.0f;
 	double oldmloss = 0.0f;
 	float rollout_time = 0.0f;
-	float lr = 3e-4f;
+
+	float lr = 0.001f;
 	int bestcar = 0;
-	int inputs = 24;
+	int inputs = 32;
 	int step = 0;
 	int rolloutstep = 0;
-	int c = 1000;
+	//int c = 1000;
 	int gen = 1;
 	int fpsCount = 0;
 	int cars =64 ;
 	int replaybuffersize = cars * 2048;
 	int samplecar = cars;
-	int rays = 16;
+	int rays = 24;
 	int actor_layers = 0;
 	int critic_layers = 0;
 	int obstacles = 0;
@@ -74,10 +75,10 @@ inline int hbatchsize = 128;
 inline int randomobshold = 0;
 inline int steps = 0;
 inline int adam_step = 1;
-inline float reach_reward = 10.0f;
-inline float crash_penality = 5.0f;
-inline float diff_change_reward = 1.0f;
-inline float danger_penalty = 1.0f;
+inline float reach_reward = 25.0f;
+inline float crash_penality = 10.0f;
+inline float diff_change_reward = 1.5f;
+inline float danger_penalty = 0.50f;
 inline param settings;
 
 //constant data
@@ -97,27 +98,35 @@ struct dparams {
 
 inline dparams dparam;
 //ray predefined angles from center
-inline float ray_angles[16] = {
+inline float ray_angles[24] = {
 	 0.0f,
-	0.3926991f,   // 22.5°
-	0.7853982f,   // 45°
-	1.1780972f,   // 67.5°
-	1.5707963f,   // 90°
-	1.9634954f,   // 112.5°
-	2.3561945f,   // 135°
-	2.7488936f,   // 157.5°
-	3.1415927f,   // 180°
-   -2.7488936f,   // -157.5°
-   -2.3561945f,   // -135°
-   -1.9634954f,   // -112.5°
-   -1.5707963f,   // -90°
-   -1.1780972f,   // -67.5°
-   -0.7853982f,   // -45°
-   -0.3926991f    // -22.5°
+	 0.2617994f,   // 15°
+	 0.5235988f,   // 30°
+	 0.7853982f,   // 45°
+	 1.0471976f,   // 60°
+	 1.3089969f,   // 75°
+	 1.5707963f,   // 90°
+	 1.8325957f,   // 105°
+	 2.0943951f,   // 120°
+	 2.3561945f,   // 135°
+	 2.6179939f,   // 150°
+	 2.8797933f,   // 165°
+	 3.1415927f,   // 180°
+	-2.8797933f,   // -165°
+	-2.6179939f,   // -150°
+	-2.3561945f,   // -135°
+	-2.0943951f,   // -120°
+	-1.8325957f,   // -105°
+	-1.5707963f,   // -90°
+	-1.3089969f,   // -75°
+	-1.0471976f,   // -60°
+	-0.7853982f,   // -45°
+	-0.5235988f,   // -30°
+	-0.2617994f    // -15°
 };
 //ray struct
 struct ray {
-	float len[16];
+	float len[24];
 };
 
 
@@ -153,7 +162,7 @@ inline float2* critic_adam_bias = nullptr;
 
 
 struct replaybuffer {
-	float s1[24];
+	float s1[32];
 	
 	float reward;
 	float logprob;
