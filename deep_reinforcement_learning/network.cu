@@ -351,12 +351,12 @@ __device__ float get_lClip(replaybuffer* buffer, int s) {
 	float ep = 0.2f;
 	float clipped_out = 0.f;
 	float adv = buffer[s].advantage;
-	if (adv > 0) {
+	if (adv >= 0) {
 		if (r > 1 + ep) clipped_out = 0;
 		else clipped_out = -adv * r;
 	}
 
-	if (adv < 0) {
+	if (adv <= 0) {
 		if (r < 1 - ep) clipped_out = 0;
 		else clipped_out = -adv * r;
 	}
@@ -405,20 +405,20 @@ __global__ void compute_delta(int n, int d, int l1_nout, int l1w, int l1_nin, in
 	
 	
 }
-__device__ float getmoment(float moment, float gradient, float beta, float betat) {
+__device__ float getmoment(float moment, float gradient, float beta) {
 	float x = 0.0f;
 
 	x = beta * moment + (1.0f - beta) * gradient;
-	x = x / betat;
+	
 	return x;
 
 
 }
-__device__ float getv(float v, float gradient, float beta, float betat) {
+__device__ float getv(float v, float gradient, float beta) {
 	float x = 0.0f;
 
 	x = beta * v + (1.0f - beta) * gradient * gradient;
-	x = x / betat;
+	
 	return x;
 
 }
@@ -441,13 +441,18 @@ __global__ void tuneweights(int n, int nin, int l, int l1d, int lw, int lsize, i
 		biasgrad += dDelta[b * nodedatasize + d + i];
 	float bm = abias[lb + i].x;
 	float bv = abias[lb + i].y;
-	bm = getmoment(bm, biasgrad / curbatch, beta1, betat1);
-	bv = getv(bv, biasgrad / curbatch, beta2, betat2);
-	float bupdate = getlr(lr, bm, bv, 1e-6f);
+	bm = getmoment(bm, biasgrad / curbatch, beta1);
+	abias[lb + i].x = bm;
+	float bm_hat = bm / betat1;
+
+
+	bv = getv(bv, biasgrad / curbatch, beta2);
+	abias[lb + i].y = bv;
+	float bv_hat = bv / betat2;
+
+	float bupdate = getlr(lr, bm_hat, bv_hat, 1e-6f);
 //	bupdate= clamp(bupdate, -0.05f, 0.05f);
 	dBias[lb + i] -=bupdate;
-	abias[lb + i].x = bm;
-	abias[lb + i].y = bv;
 	for (int k = 0; k < nin; k++)
 	{
 		float wgrad = 0.0f;
@@ -460,13 +465,16 @@ __global__ void tuneweights(int n, int nin, int l, int l1d, int lw, int lsize, i
 
 		float wm = aweights[lw + i * lsize + k].x;
 		float wv = aweights[lw + i * lsize + k].y;
-		wm = getmoment(wm, wgrad / curbatch, beta1, betat1);
-		wv = getv(wv, wgrad / curbatch, beta2, betat2);
-		float wupdate = getlr(lr,wm,wv,1e-6f);
+		wm = getmoment(wm, wgrad / curbatch, beta1);
+		aweights[lw + i * lsize + k].x = wm;
+		float wm_hat = wm / betat1;
+
+		wv = getv(wv, wgrad / curbatch, beta2);
+		aweights[lw + i * lsize + k].y = wv;
+		float wv_hat = wv / betat2;
+		float wupdate = getlr(lr,wm_hat,wv_hat,1e-6f);
 		//wupdate = clamp(wupdate, -0.05f, 0.05f);
 		dWeights[lw + i * lsize + k] -=wupdate ;
-		aweights[lw + i * lsize + k].x = wm;
-		aweights[lw + i * lsize + k].y = wv;
 	}
 }
 __device__ float sigmoid(float x) {
@@ -506,12 +514,12 @@ __device__ void getoutput(int D, float* nodevals, float4* carcontrol, replaybuff
 	buffer[bidx].action = action;
 
 	float4 cc = make_float4(0.f, 0.f, 0.f, 0.f);
-	if (buffer[bidx].action == 0) cc.x = sigmoid(nodevals[caridx(D, 0, ci)]); // forward
-	else if (buffer[bidx].action == 1) cc.y= sigmoid(nodevals[caridx(D, 1, ci)]); // backward
-	else if (buffer[bidx].action == 2) cc.z = tanh(nodevals[caridx(D,2,ci)]); // left
-	else if (buffer[bidx].action == 3) cc.w = tanh(nodevals[caridx(D, 3, ci)]); // right
-	else if (buffer[bidx].action == 4) { cc.x = sigmoid(nodevals[caridx(D, 4, ci)]); cc.w = tanh(nodevals[caridx(D, 3, ci)]); } // fprward+right
-	else if (buffer[bidx].action == 5) { cc.x = sigmoid(nodevals[caridx(D, 5, ci)]); cc.z = tanh(nodevals[caridx(D, 2, ci)]); }// forward+left
+	if (buffer[bidx].action == 0) cc.x = (nodevals[caridx(D, 0, ci)]); // forward
+	else if (buffer[bidx].action == 1) cc.y= (nodevals[caridx(D, 1, ci)]); // backward
+	else if (buffer[bidx].action == 2) cc.z = (nodevals[caridx(D,2,ci)]); // left
+	else if (buffer[bidx].action == 3) cc.w = (nodevals[caridx(D, 3, ci)]); // right
+	else if (buffer[bidx].action == 4) { cc.x = (nodevals[caridx(D, 4, ci)]); cc.w = (nodevals[caridx(D, 3, ci)]); } // fprward+right
+	else if (buffer[bidx].action == 5) { cc.x = (nodevals[caridx(D, 5, ci)]); cc.z = (nodevals[caridx(D, 2, ci)]); }// forward+left
 	carcontrol[ci] = cc;
 
 	buffer[bidx].old_logprob = logf(fmaxf(nodevals[caridx(D, action,ci)],1e-8f));
@@ -561,7 +569,7 @@ __global__ void reward_kernel(int n,int s, replaybuffer* buffer, float4* data1,f
 		
 		float prevdist =  data2[i].x;
 		float diff = prevdist  - curdist ;
-		float progressreward  = (diff < 0.0f) ? 0.0f : dcr * (diff / (d.maxdisttotarget * DT));
+		float progressreward  = (diff < 0.0f) ? -0.5f : dcr * (diff / (d.maxdisttotarget * DT));
 		data2[i].x = curdist;
 		float still = (fabsf(diff) < 0.01f) ? -0.02f : 0.0f;
 		float coneMin = 1.0f;
@@ -643,11 +651,16 @@ __global__ void computevalskernel(int cars,int ticks, replaybuffer* buffer) {
 
 
 		buffer[i].advantage = gae;
-		buffer[i].rtg = gae + buffer[i].value;
+	//	buffer[i].rtg = gae + buffer[i].value;
 
 
 		atomicAdd(&MSE, gae * gae);
 	}
+}
+__global__ void compute_rtg(int n, replaybuffer* buffer) {
+	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	if (i >= n)return;
+	buffer[i].rtg = buffer[i].advantage - buffer[i].value;
 }
 __device__ double d_adv_mean;
 __device__ double d_adv_var;
@@ -831,6 +844,8 @@ void normalize_advantages() {
 	float std = sqrtf(fmaxf((float)var, 1e-8f));
 
 	normalize_advantages << <b, t >> > (settings.replaybuffersize, d_state, (float)mean, std);
+
+	compute_rtg << <blocks(settings.replaybuffersize), threads >> > (settings.replaybuffersize, d_state);
 }
 void runfrozennet(int s, int curbatch, bool isactor) {
 	auto& layerdata = (isactor) ? actor_layerdata : critic_layerdata;
@@ -953,7 +968,7 @@ void backpropogation(int s, int curBatch, bool isactor) {
 
 
 	}
-	adam_step++;
+	
 
 }
 void frozennet(bool isactor) {
@@ -1012,12 +1027,18 @@ void run_network() {
 			settings.mloss = (l / (double)settings.replaybuffersize);
 			double zz = 0;
 			cudaMemcpyToSymbol(MSE, &zz, sizeof(double));
-		//for (int i = 0; i < 3; i++) {
+			normalize_advantages(); /*if no learning sign re compute
+			rtg after normilization tho it doesnt needed to as rtg is only used in critic backprop but good to try
+			also the norm adv is used in lclip it could also be an issue,
+			a better thing would be to compute rtg after normalized adv so critic and actor both reviced target based on norm adv 
+			
+			*/
+			
+		for (int i = 0; i < 3; i++) {
 			shuffleindices();
 			frozennet(false);//critic backprop
-			normalize_advantages();
 			frozennet(true);//actor backprop
-			
+			adam_step++;
 
 			
 
@@ -1025,7 +1046,7 @@ void run_network() {
 			cudaMemcpyToSymbol(d_reward, &zero, sizeof(float));
 			rewardgraph.push_back((h_reward / settings.replaybuffersize));
 			geterror("reward cpy from symbol", err);
-		//}
+		}
 		auto end = std::chrono::steady_clock::now();
 
 		std::chrono::duration<double> elapsed = end - start;
