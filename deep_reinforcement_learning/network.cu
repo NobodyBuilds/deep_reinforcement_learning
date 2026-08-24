@@ -241,7 +241,7 @@ void initWB(float min, float max) {
 
 		critic_weights.resize(critic_weightbuffersize);
 		critic_bias.resize(critic_biassize);
-		float bound = sqrtf(60.0f / (24 + 6));
+		float bound = sqrtf(60.0f / (32 + 6));
 		std::mt19937 rng(42);
 		std::uniform_real_distribution<float> dist(-bound, bound);
 		//actor network weights and bias
@@ -334,86 +334,6 @@ __device__ void solvelayers(int n, int ci, int nin, int w, int d, int b, int p, 
 
 		dNodeData[caridx(d, i, ci)] = isout ? val : leakyrelu(val);
 	}
-
-}
-__global__ void firstlayer(int n, bool isactor, int s, const float4* __restrict__ data1, const float4* __restrict__ data2, const ray* __restrict__ rays, const float* __restrict__ weights, const float* __restrict__ bias, float* nodevals, float* d_preact, replaybuffer* buffer) {
-
-	float4 c = __ldg(&data1[0]);
-	float4 c2 = __ldg(&data2[0]);
-
-
-	float dx = d.targetx - c.x;
-	float dy = d.taregety - c.y;
-	float dist = sqrtf(dx * dx + dy * dy);
-
-	float targetinsight = (dist < d.raymaxdist) ? 1.0f : 0.0f;
-
-	float targetForward = (dx * cosf(c.z) + dy * sinf(c.z)) / d.maxdisttotarget;
-	float targetSide = (-dx * sinf(c.z) + dy * cosf(c.z)) / d.maxdisttotarget;
-
-	float angle = c.z;
-
-
-	float input[24] = { sinf(angle), cosf(angle),
-									targetForward,targetSide,
-									c2.w /( d.maxsteer * (CUDART_PI_F / 180.0f)),
-									c.w / d.maxspeed,
-									targetinsight,
-									rays[0].len[0] / d.raymaxdist,
-									rays[0].len[1] / d.raymaxdist,
-									rays[0].len[2] / d.raymaxdist,
-									rays[0].len[3] / d.raymaxdist,
-									rays[0].len[4] / d.raymaxdist,
-									rays[0].len[5] / d.raymaxdist,
-									rays[0].len[6] / d.raymaxdist,
-									rays[0].len[7] / d.raymaxdist,
-									rays[0].len[8] / d.raymaxdist,
-									rays[0].len[9] / d.raymaxdist,
-									rays[0].len[10] / d.raymaxdist,
-									rays[0].len[11] / d.raymaxdist,
-									rays[0].len[12] / d.raymaxdist,
-									rays[0].len[13] / d.raymaxdist,
-									rays[0].len[14] / d.raymaxdist,
-									rays[0].len[15] / d.raymaxdist,
-									dist / d.maxdisttotarget
-	};
-	int insize = 24;
-	if (isactor) {
-		for (int b = 0; b < insize; b++) {
-			buffer[s].s1[b] = input[b];
-
-		}
-	}
-	int i = blockIdx.x * blockDim.x + threadIdx.x;
-	if (i >= n)return;
-
-	float x = bias[idx(0, i)];
-	for (int k = 0; k < insize; k++) {
-		x += input[k] * weights[idx(0 + i * insize, k)];
-
-	}
-
-	d_preact[idx(0, i)] = x;
-	nodevals[idx(0, i)] = leakyrelu(x);
-}
-__global__ void solvelayers(int n, int nin, int w, int D, int b, int p, bool isout, const float* __restrict__ dWeights, const float* __restrict__ dBias, float* dNodeData, float* preact) {
-
-
-
-	int i = blockIdx.x * blockDim.x + threadIdx.x;
-	if (i >= n)return;
-
-
-	float val = dBias[idx(b, i)];
-
-	for (int j = 0; j < nin; j++) {
-		float v = dNodeData[idx(p, j)];
-		val += v * dWeights[idx(w + i * nin, j)];
-	}
-
-	preact[idx(D, i)] = val;
-	dNodeData[idx(D, i)] = isout ?  val : leakyrelu(val);
-
 
 }
 __device__ float dslope(float x) {
@@ -662,11 +582,11 @@ __global__ void reward_kernel(int n,int s, replaybuffer* buffer, float4* data1,f
 		}
 		else logframe++;*/
 		buffer[bidx].reward = reward;
-		if (alive[i] == 0)oldr = 0.0f;
-		if (reward > oldr) {
+		if (alive[i] == 0)oldr = d.maxdisttotarget;
+		if (curdist < oldr) {
 			if (alive[i] == 1) {
 				id = i;
-				oldr = reward;
+				oldr = curdist;
 			}
 		}
 		atomicAdd(&d_reward, reward);
@@ -752,8 +672,8 @@ __global__ void firstlayerfrozen(int n, int s, int* indices, const float* __rest
 
 
 	float x = bias[idx(0, i)];
-	for (int k = 0; k < 24; k++) {
-		x += buffer[indices[s * batchsize + b]].s1[k] * weights[idx(0 + i * 24, k)];
+	for (int k = 0; k < 32; k++) {
+		x += buffer[indices[s * batchsize + b]].s1[k] * weights[idx(0 + i * 32, k)];
 
 	}
 	int off = b * nodedatasize + i;
@@ -813,7 +733,7 @@ __global__ void netkernel(int n, const float4* __restrict__ data1, float4* data2
 				float angle = c.z;
 
 
-				float input[24] = { sinf(angle), cosf(angle),
+				float input[32] = { sinf(angle), cosf(angle),
 												targetForward,targetSide,
 												c2.w / d.maxsteer,
 												c.w / d.maxspeed,
@@ -834,9 +754,17 @@ __global__ void netkernel(int n, const float4* __restrict__ data1, float4* data2
 												rays[i].len[13] / d.raymaxdist,
 												rays[i].len[14] / d.raymaxdist,
 												rays[i].len[15] / d.raymaxdist,
+												rays[i].len[16] / d.raymaxdist,
+												rays[i].len[17] / d.raymaxdist,
+												rays[i].len[18] / d.raymaxdist,
+												rays[i].len[19] / d.raymaxdist,
+												rays[i].len[20] / d.raymaxdist,
+												rays[i].len[21] / d.raymaxdist,
+												rays[i].len[22] / d.raymaxdist,
+												rays[i].len[23] / d.raymaxdist,
 												dist / d.maxdisttotarget
 				};
-				int insize = 24;
+				int insize = 32;
 				if (isactor) {
 					int bidx = s * d.numcars + i;
 					for (int b = 0; b < insize; b++) {
@@ -846,7 +774,7 @@ __global__ void netkernel(int n, const float4* __restrict__ data1, float4* data2
 				}
 				int didx = layer[0].dIdx;
 
-				firstlayer(layer[0].Nout, i, 0, didx, 24, input, weights, bias, nodevals);
+				firstlayer(layer[0].Nout, i, 0, didx, 32, input, weights, bias, nodevals);
 			}
 			else {
 
@@ -1077,18 +1005,19 @@ void run_network() {
 		settings.rolloutstep++;
 		auto start = std::chrono::high_resolution_clock::now();
 			computevals();
-		for (int i = 0; i < 3; i++) {
-			shuffleindices();
-			frozennet(false);//critic backprop
-			normalize_advantages();
-			frozennet(true);//actor backprop
 			settings.oldmloss = settings.mloss;
 			double l = 0.0f;
-			cudaError_t err =cudaMemcpyFromSymbol(&l, MSE, sizeof(double));
+			cudaError_t err = cudaMemcpyFromSymbol(&l, MSE, sizeof(double));
 			geterror("mse cpy from symbol", err);
 			settings.mloss = (l / (double)settings.replaybuffersize);
 			double zz = 0;
 			cudaMemcpyToSymbol(MSE, &zz, sizeof(double));
+		//for (int i = 0; i < 3; i++) {
+			shuffleindices();
+			frozennet(false);//critic backprop
+			normalize_advantages();
+			frozennet(true);//actor backprop
+			
 
 			
 
@@ -1096,7 +1025,7 @@ void run_network() {
 			cudaMemcpyToSymbol(d_reward, &zero, sizeof(float));
 			rewardgraph.push_back((h_reward / settings.replaybuffersize));
 			geterror("reward cpy from symbol", err);
-		}
+		//}
 		auto end = std::chrono::steady_clock::now();
 
 		std::chrono::duration<double> elapsed = end - start;

@@ -46,7 +46,7 @@ struct param {
 	float rollout_time = 0.0f;
 	float lr = 3e-4f;
 	int bestcar = 0;
-	int inputs = 24;
+	int inputs = 32;
 	int step = 0;
 	int rolloutstep = 0;
 	int c = 1000;
@@ -55,7 +55,7 @@ struct param {
 	int cars =64 ;
 	int replaybuffersize = cars * 2048;
 	int samplecar = cars;
-	int rays = 16;
+	int rays = 24;
 	int actor_layers = 0;
 	int critic_layers = 0;
 	int obstacles = 0;
@@ -97,27 +97,35 @@ struct dparams {
 
 inline dparams dparam;
 //ray predefined angles from center
-inline float ray_angles[16] = {
+inline float ray_angles[24] = {
 	 0.0f,
-	0.3926991f,   // 22.5°
-	0.7853982f,   // 45°
-	1.1780972f,   // 67.5°
-	1.5707963f,   // 90°
-	1.9634954f,   // 112.5°
-	2.3561945f,   // 135°
-	2.7488936f,   // 157.5°
-	3.1415927f,   // 180°
-   -2.7488936f,   // -157.5°
-   -2.3561945f,   // -135°
-   -1.9634954f,   // -112.5°
-   -1.5707963f,   // -90°
-   -1.1780972f,   // -67.5°
-   -0.7853982f,   // -45°
-   -0.3926991f    // -22.5°
+	 0.2617994f,   // 15°
+	 0.5235988f,   // 30°
+	 0.7853982f,   // 45°
+	 1.0471976f,   // 60°
+	 1.3089969f,   // 75°
+	 1.5707963f,   // 90°
+	 1.8325957f,   // 105°
+	 2.0943951f,   // 120°
+	 2.3561945f,   // 135°
+	 2.6179939f,   // 150°
+	 2.8797933f,   // 165°
+	 3.1415927f,   // 180°
+	-2.8797933f,   // -165°
+	-2.6179939f,   // -150°
+	-2.3561945f,   // -135°
+	-2.0943951f,   // -120°
+	-1.8325957f,   // -105°
+	-1.5707963f,   // -90°
+	-1.3089969f,   // -75°
+	-1.0471976f,   // -60°
+	-0.7853982f,   // -45°
+	-0.5235988f,   // -30°
+	-0.2617994f    // -15°
 };
 //ray struct
 struct ray {
-	float len[16];
+	float len[24];
 };
 
 
@@ -153,7 +161,7 @@ inline float2* critic_adam_bias = nullptr;
 
 
 struct replaybuffer {
-	float s1[24];
+	float s1[32];
 	
 	float reward;
 	float logprob;
