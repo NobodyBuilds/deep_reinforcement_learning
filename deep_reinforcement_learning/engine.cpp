@@ -53,8 +53,8 @@ int main() {
 
 		settings.accumulator += frameTime * settings.trainspeed;
 		
-		while (settings.accumulator >= settings.dt)
-		{
+		//while (settings.accumulator >= settings.dt)
+		//{
 
 			run_network();
 			
@@ -62,8 +62,8 @@ int main() {
 			settings.timer += settings.dt;
 			
 
-			settings.accumulator -= settings.dt;
-		}
+			//settings.accumulator -= settings.dt;
+		//}
 
 		draw();
 
@@ -76,7 +76,7 @@ int main() {
 			settings.alive = true;
 			settings.nextgen = true;
 			randomobshold++;
-			if (settings.randomobstacles && randomobshold>=10) {
+			if (settings.randomobstacles && randomobshold>=1) {
 				randomobs();
 				randomobshold = 0;
 			}

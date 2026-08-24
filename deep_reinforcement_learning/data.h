@@ -22,7 +22,7 @@ struct param {
 	float carwidth = 25.0f;
 	float carheight = 12.0f;
 	float car_r = 1.0f, car_b = 0.0f, car_g = 0.0f;
-	float targetx = 1600.0f, targety = 450.0f;
+	float targetx = 1600.0f, targety = 260.0f;
 	float targetsize = 40.0f;
 	float dumx = 0.0, dumy = 0.0f;
 	float ray_max_len = 250.0f;
@@ -53,7 +53,7 @@ struct param {
 	int gen = 1;
 	int fpsCount = 0;
 	int cars =64 ;
-	int replaybuffersize = cars * 2048;
+	int replaybuffersize = cars * 1024;
 	int samplecar = cars;
 	int rays = 24;
 	int actor_layers = 0;
@@ -74,10 +74,10 @@ inline int hbatchsize = 128;
 inline int randomobshold = 0;
 inline int steps = 0;
 inline int adam_step = 1;
-inline float reach_reward = 10.0f;
-inline float crash_penality = 5.0f;
-inline float diff_change_reward = 1.0f;
-inline float danger_penalty = 1.0f;
+inline float reach_reward = 20.0f;
+inline float crash_penality = 10.0f;
+inline float diff_change_reward = 1.5f;
+inline float danger_penalty = 0.50f;
 inline param settings;
 
 //constant data

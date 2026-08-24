@@ -366,9 +366,9 @@ __global__ void checkstatekernel(int n,int* alive,float4* data1,float4* data2, r
         
     }
 
-   /* if (alive[i] != 1) {
+    if (alive[i] != 1) {
         atomicAdd(&Alive, 1);
-    }*/
+    }
 
     
 }
@@ -464,7 +464,7 @@ bool rectOverlap(
 }
 h_float2 getpos(bool isspawn)
 {
-     float EPSILON = (isspawn)?20.0f:10.0f;
+     float EPSILON = (isspawn)?100.0f:10.0f;
 
     while (true)
     {

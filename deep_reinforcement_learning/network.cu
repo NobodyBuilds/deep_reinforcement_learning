@@ -241,7 +241,7 @@ void initWB(float min, float max) {
 
 		critic_weights.resize(critic_weightbuffersize);
 		critic_bias.resize(critic_biassize);
-		float bound = sqrtf(60.0f / (32 + 6));
+		float bound = sqrtf(60.0f / (32 + 64));
 		std::mt19937 rng(42);
 		std::uniform_real_distribution<float> dist(-bound, bound);
 		//actor network weights and bias
@@ -512,14 +512,14 @@ __device__ void getoutput(int D, float* nodevals, float4* carcontrol, replaybuff
 		if (r <= cum||j==5) { action = j; break; }
 	}
 	buffer[bidx].action = action;
-
+	//TODO keep only 4 outputs as continues inputs using sigmpoid function
 	float4 cc = make_float4(0.f, 0.f, 0.f, 0.f);
-	if (buffer[bidx].action == 0) cc.x = (nodevals[caridx(D, 0, ci)]); // forward
-	else if (buffer[bidx].action == 1) cc.y= (nodevals[caridx(D, 1, ci)]); // backward
-	else if (buffer[bidx].action == 2) cc.z = (nodevals[caridx(D,2,ci)]); // left
-	else if (buffer[bidx].action == 3) cc.w = (nodevals[caridx(D, 3, ci)]); // right
-	else if (buffer[bidx].action == 4) { cc.x = (nodevals[caridx(D, 4, ci)]); cc.w = (nodevals[caridx(D, 3, ci)]); } // fprward+right
-	else if (buffer[bidx].action == 5) { cc.x = (nodevals[caridx(D, 5, ci)]); cc.z = (nodevals[caridx(D, 2, ci)]); }// forward+left
+	if (buffer[bidx].action == 0) cc.x = 1.0f; // forward
+	else if (buffer[bidx].action == 1) cc.y= 1.0f; // backward
+	else if (buffer[bidx].action == 2) cc.z= 1.0f; // left
+	else if (buffer[bidx].action == 3) cc.w = 1.0f; // right
+	else if (buffer[bidx].action == 4) { cc.x = 1.0f; cc.w = 1.0f; } // fprward+right
+	else if (buffer[bidx].action == 5) { cc.x = 1.0f; cc.z = 1.0f; }// forward+left
 	carcontrol[ci] = cc;
 
 	buffer[bidx].old_logprob = logf(fmaxf(nodevals[caridx(D, action,ci)],1e-8f));
@@ -574,12 +574,12 @@ __global__ void reward_kernel(int n,int s, replaybuffer* buffer, float4* data1,f
 		float still = (fabsf(diff) < 0.01f) ? -0.02f : 0.0f;
 		float coneMin = 1.0f;
 		float allMin = 1.0f;
-		for (int k = 0; k < 16; k++)
+		for (int k = 0; k < 24; k++)
 			allMin = fminf(allMin, rays[i].len[k] / d.raymaxdist);
 		float danger = 1.0f - allMin;
 		float speedfrac = fabsf(c.w) / d.maxspeed;
-		float dangerPenalty = -dp * danger * danger * (0.5f + 0.5f * speedfrac); 
-		float forward = (control[i].x > 0.0f) ? 0.1f : -0.05f;
+		float dangerPenalty = -dp * danger * danger;
+	//	float forward = (control[i].x > 0.0f) ? 0.5f : -0.1f;
 		
 	
 		float reward = progressreward + dangerPenalty  + alivereward +still ;
@@ -651,7 +651,7 @@ __global__ void computevalskernel(int cars,int ticks, replaybuffer* buffer) {
 
 
 		buffer[i].advantage = gae;
-	//	buffer[i].rtg = gae + buffer[i].value;
+		buffer[i].rtg = gae + buffer[i].value;
 
 
 		atomicAdd(&MSE, gae * gae);
@@ -660,7 +660,7 @@ __global__ void computevalskernel(int cars,int ticks, replaybuffer* buffer) {
 __global__ void compute_rtg(int n, replaybuffer* buffer) {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= n)return;
-	buffer[i].rtg = buffer[i].advantage - buffer[i].value;
+	buffer[i].rtg = buffer[i].advantage + buffer[i].value;
 }
 __device__ double d_adv_mean;
 __device__ double d_adv_var;
@@ -845,7 +845,7 @@ void normalize_advantages() {
 
 	normalize_advantages << <b, t >> > (settings.replaybuffersize, d_state, (float)mean, std);
 
-	compute_rtg << <blocks(settings.replaybuffersize), threads >> > (settings.replaybuffersize, d_state);
+	//compute_rtg << <blocks(settings.replaybuffersize), threads >> > (settings.replaybuffersize, d_state);
 }
 void runfrozennet(int s, int curbatch, bool isactor) {
 	auto& layerdata = (isactor) ? actor_layerdata : critic_layerdata;
@@ -1031,10 +1031,10 @@ void run_network() {
 			rtg after normilization tho it doesnt needed to as rtg is only used in critic backprop but good to try
 			also the norm adv is used in lclip it could also be an issue,
 			a better thing would be to compute rtg after normalized adv so critic and actor both reviced target based on norm adv 
-			
+			--it didnt work.
 			*/
 			
-		for (int i = 0; i < 3; i++) {
+		for (int i = 0; i < 6; i++) {
 			shuffleindices();
 			frozennet(false);//critic backprop
 			frozennet(true);//actor backprop
@@ -1143,7 +1143,7 @@ void restart() {
 	settings.cars = settings.samplecar;
 	settings.step = 0;
 	settings.gen = 0;
-	settings.replaybuffersize = settings.cars *2048;
+	settings.replaybuffersize = settings.cars *1024;
 	critic_nodedatasize = 0;
 	settings.actor_layers = 0;
 	settings.critic_layers = 0;
