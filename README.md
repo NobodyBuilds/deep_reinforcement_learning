@@ -6,7 +6,10 @@ This project is the next step after my CUDA neural network implementation, exten
 
 ## Video Demo
 
-Add video demo here
+
+
+https://github.com/user-attachments/assets/36dc7840-e653-4e33-b356-21f795154254
+
 
 ## Overview
 
