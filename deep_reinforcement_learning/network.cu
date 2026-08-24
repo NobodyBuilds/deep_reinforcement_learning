@@ -241,7 +241,7 @@ void initWB(float min, float max) {
 
 		critic_weights.resize(critic_weightbuffersize);
 		critic_bias.resize(critic_biassize);
-		float bound = sqrtf(60.0f / (32 + 6));
+		float bound = sqrtf(60.0f / (24 + 6));
 		std::mt19937 rng(42);
 		std::uniform_real_distribution<float> dist(-bound, bound);
 		//actor network weights and bias
@@ -354,7 +354,7 @@ __global__ void firstlayer(int n, bool isactor, int s, const float4* __restrict_
 	float angle = c.z;
 
 
-	float input[32] = { sinf(angle), cosf(angle),
+	float input[24] = { sinf(angle), cosf(angle),
 									targetForward,targetSide,
 									c2.w /( d.maxsteer * (CUDART_PI_F / 180.0f)),
 									c.w / d.maxspeed,
@@ -377,7 +377,7 @@ __global__ void firstlayer(int n, bool isactor, int s, const float4* __restrict_
 									rays[0].len[15] / d.raymaxdist,
 									dist / d.maxdisttotarget
 	};
-	int insize = 32;
+	int insize = 24;
 	if (isactor) {
 		for (int b = 0; b < insize; b++) {
 			buffer[s].s1[b] = input[b];
@@ -752,8 +752,8 @@ __global__ void firstlayerfrozen(int n, int s, int* indices, const float* __rest
 
 
 	float x = bias[idx(0, i)];
-	for (int k = 0; k < 32; k++) {
-		x += buffer[indices[s * batchsize + b]].s1[k] * weights[idx(0 + i * 32, k)];
+	for (int k = 0; k < 24; k++) {
+		x += buffer[indices[s * batchsize + b]].s1[k] * weights[idx(0 + i * 24, k)];
 
 	}
 	int off = b * nodedatasize + i;
@@ -811,20 +811,32 @@ __global__ void netkernel(int n, const float4* __restrict__ data1, float4* data2
 				float targetSide = (-dx * sinf(c.z) + dy * cosf(c.z)) / d.maxdisttotarget;
 
 				float angle = c.z;
-				float input[32];
-				input[0] = sinf(angle);
-				input[1] = cosf(angle);
-				input[2] = targetForward;
-				input[3] = targetSide;
-				input[4] = c2.w / d.maxsteer;
-				input[5] = c.w / d.maxspeed;
-				input[6] = targetinsight;
-				input[7] = dist / d.maxdisttotarget;
 
-				for (int x = 0; x < 24; x++){
-					input[8 + x] = rays[i].len[x];
-				}
-				int insize = 32;
+
+				float input[24] = { sinf(angle), cosf(angle),
+												targetForward,targetSide,
+												c2.w / d.maxsteer,
+												c.w / d.maxspeed,
+												targetinsight,
+												rays[i].len[0] / d.raymaxdist,
+												rays[i].len[1] / d.raymaxdist,
+												rays[i].len[2] / d.raymaxdist,
+												rays[i].len[3] / d.raymaxdist,
+												rays[i].len[4] / d.raymaxdist,
+												rays[i].len[5] / d.raymaxdist,
+												rays[i].len[6] / d.raymaxdist,
+												rays[i].len[7] / d.raymaxdist,
+												rays[i].len[8] / d.raymaxdist,
+												rays[i].len[9] / d.raymaxdist,
+												rays[i].len[10] / d.raymaxdist,
+												rays[i].len[11] / d.raymaxdist,
+												rays[i].len[12] / d.raymaxdist,
+												rays[i].len[13] / d.raymaxdist,
+												rays[i].len[14] / d.raymaxdist,
+												rays[i].len[15] / d.raymaxdist,
+												dist / d.maxdisttotarget
+				};
+				int insize = 24;
 				if (isactor) {
 					int bidx = s * d.numcars + i;
 					for (int b = 0; b < insize; b++) {
@@ -834,7 +846,7 @@ __global__ void netkernel(int n, const float4* __restrict__ data1, float4* data2
 				}
 				int didx = layer[0].dIdx;
 
-				firstlayer(layer[0].Nout, i, 0, didx, 32, input, weights, bias, nodevals);
+				firstlayer(layer[0].Nout, i, 0, didx, 24, input, weights, bias, nodevals);
 			}
 			else {
 
@@ -1065,20 +1077,18 @@ void run_network() {
 		settings.rolloutstep++;
 		auto start = std::chrono::high_resolution_clock::now();
 			computevals();
+		for (int i = 0; i < 3; i++) {
+			shuffleindices();
+			frozennet(false);//critic backprop
+			normalize_advantages();
+			frozennet(true);//actor backprop
 			settings.oldmloss = settings.mloss;
 			double l = 0.0f;
-			cudaError_t err = cudaMemcpyFromSymbol(&l, MSE, sizeof(double));
+			cudaError_t err =cudaMemcpyFromSymbol(&l, MSE, sizeof(double));
 			geterror("mse cpy from symbol", err);
 			settings.mloss = (l / (double)settings.replaybuffersize);
 			double zz = 0;
 			cudaMemcpyToSymbol(MSE, &zz, sizeof(double));
-
-			shuffleindices();
-	//	for (int i = 0; i < 3; i++) {
-			frozennet(false);//critic backprop
-			normalize_advantages();
-			frozennet(true);//actor backprop
-			
 
 			
 
@@ -1086,7 +1096,7 @@ void run_network() {
 			cudaMemcpyToSymbol(d_reward, &zero, sizeof(float));
 			rewardgraph.push_back((h_reward / settings.replaybuffersize));
 			geterror("reward cpy from symbol", err);
-		//}
+		}
 		auto end = std::chrono::steady_clock::now();
 
 		std::chrono::duration<double> elapsed = end - start;
@@ -1250,10 +1260,6 @@ void cudafree() {
 	cudaFree(d_cars_nodevals);
 	cudaFree(d_actlayer);
 	cudaFree(d_critlayer);
-	cudaFree(actor_adam_bias);
-	cudaFree(critic_adam_bias);
-	cudaFree(actor_adam_weights);
-	cudaFree(critic_adam_weights);
 
 	
 

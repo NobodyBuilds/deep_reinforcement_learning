@@ -101,14 +101,14 @@ __global__ void registercars(int n, float4* data1,ray* rays,float4* data2,float4
 
     alive[i] = 1;
 
-    for (int k = 0; k < 24; k++) {
+    for (int k = 0; k < 16; k++) {
         rays[i].len[k] = dx;
     }
     carcontrol[i] = make_float4(0.f, 0.f, 0.f, 0.f);
 
 }
 
- __constant__ float d_ray_angles[24];
+ __constant__ float d_ray_angles[16];
  
 void initcars() {
     int n = settings.cars;
@@ -290,7 +290,7 @@ void loadraydata() {
 
   
 
-    fillraydata << <blocks(settings.rays), threads >> > (24,devPtr,dotdevPtr,rays,data1,settings.bestcar);
+    fillraydata << <blocks(settings.rays), threads >> > (16,devPtr,dotdevPtr,rays,data1,settings.bestcar);
 
    cudaError_t err= cudaGraphicsUnmapResources(1, &raysres, 0);
     if (err != cudaSuccess && first) {
@@ -306,8 +306,8 @@ void loadraydata() {
 
 extern "C" void drawrays() {
     loadraydata();
-    render2d.drawlineinstancedbyinterop(24,1);
-    render2d.drawcircleinstancedbyinterop(24, 1);
+    render2d.drawlineinstancedbyinterop(16,1);
+    render2d.drawcircleinstancedbyinterop(16, 1);
     cudaError_t err = cudaGetLastError();
     geterror("draw rays", err);
 }

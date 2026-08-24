@@ -14,7 +14,7 @@
 #include <cmath>
 #include <math.h>
 #include "net.h"
-__constant__ float d2_ray_angles[24];
+__constant__ float d2_ray_angles[16];
 //render obstacles
 cudaGraphicsResource* obstaclesRes;
 extern "C" void registerObstaclesVbo() {
@@ -262,7 +262,7 @@ __global__ void rayhit(int n,ray* rays, const float4* __restrict__ data1, const 
 
     float4 car = __ldg(&data1[i]);
 
-    for (int r = 0; r < 24; r++) {
+    for (int r = 0; r < 16; r++) {
         float angle = car.z + d2_ray_angles[r];
         float4 d = {car.x,car.y, cosf(angle),sinf(angle) };
         float dist = castray(obcount, d, maxdist, segment);
@@ -275,16 +275,16 @@ extern "C" void checkcolison() {
 }
 
 
-__constant__ float d_rayexitdist[24];
+__constant__ float d_rayexitdist[16];
 
-float rayexitdist[24];
+float rayexitdist[16];
 
 extern "C" void setrayexitdist() {
 
     float hh = settings.carheight * 0.5f;
     float hw = settings.carwidth * 0.5f;
 
-    for (int i = 0; i < 24; i++) {
+    for (int i = 0; i < 16; i++) {
         float c = fabsf(cosf(ray_angles[i]));
         float s = fabsf(sinf(ray_angles[i]));
         float tx = (c > 1e-6f) ? hw / c : INFINITY;
@@ -314,7 +314,7 @@ __global__ void checkstatekernel(int n,int* alive,float4* data1,float4* data2, r
         float dist = sqrtf(dx * dx + dy * dy);
         bool dead = false;
         int newState = alive[i];
-        for (int k = 0; k < 24; k++) {
+        for (int k = 0; k < 16; k++) {
            // float len = rays[i].len[k];
 
             if (dist - d_rayexitdist[k] <= size * 0.5f) {
@@ -327,7 +327,7 @@ __global__ void checkstatekernel(int n,int* alive,float4* data1,float4* data2, r
             }
         }
             if (!win) {
-                for (int k = 0; k < 24; k++) {
+                for (int k = 0; k < 16; k++) {
                     if (rays[i].len[k] <= d_rayexitdist[k]) {
                         newState = 0; dead = true;
 						
